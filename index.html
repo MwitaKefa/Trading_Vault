@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeVault — Trading Journal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'] },
+          colors: {
+            surface: { 50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 700: '#1e293b', 800: '#0f172a', 900: '#020617' },
+            accent: { DEFAULT: '#6366f1', light: '#818cf8', dark: '#4f46e5' },
+            profit: '#22c55e',
+            loss: '#ef4444',
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-surface-900 text-slate-200 font-sans min-h-screen antialiased">
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="fixed left-0 top-0 h-full w-64 bg-surface-800/80 backdrop-blur-xl border-r border-white/5 z-50 transform -translate-x-full lg:translate-x-0 transition-transform duration-300">
+    <div class="p-6">
+      <div class="flex items-center gap-3 mb-10">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-purple-600 flex items-center justify-center">
+          <i data-lucide="trending-up" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-white">TradeVault</h1>
+          <p class="text-xs text-slate-500">Trading Journal</p>
+        </div>
+      </div>
+      <nav class="space-y-1">
+        <button onclick="showPage('dashboard')" data-nav="dashboard" class="nav-btn active w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
+        </button>
+        <button onclick="showPage('journal')" data-nav="journal" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200">
+          <i data-lucide="book-open" class="w-4 h-4"></i> Journal
+        </button>
+        <button onclick="showPage('analytics')" data-nav="analytics" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200">
+          <i data-lucide="bar-chart-3" class="w-4 h-4"></i> Analytics
+        </button>
+        <button onclick="showPage('calendar')" data-nav="calendar" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200">
+          <i data-lucide="calendar-days" class="w-4 h-4"></i> Calendar
+        </button>
+        <button onclick="showPage('settings')" data-nav="settings" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200">
+          <i data-lucide="settings" class="w-4 h-4"></i> Settings
+        </button>
+      </nav>
+    </div>
+    <div class="absolute bottom-0 left-0 right-0 p-6 border-t border-white/5">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-400 flex items-center justify-center text-sm font-bold text-surface-900">T</div>
+        <div>
+          <p class="text-sm font-medium text-white">Trader</p>
+          <p class="text-xs text-slate-500">Free Plan</p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Mobile Overlay -->
+  <div id="sidebarOverlay" class="fixed inset-0 bg-black/60 z-40 hidden lg:hidden" onclick="toggleSidebar()"></div>
+
+  <!-- Main Content -->
+  <main class="lg:ml-64 min-h-screen">
+    <!-- Top Bar -->
+    <header class="sticky top-0 z-30 bg-surface-900/80 backdrop-blur-xl border-b border-white/5">
+      <div class="flex items-center justify-between px-4 lg:px-8 py-4">
+        <div class="flex items-center gap-4">
+          <button onclick="toggleSidebar()" class="lg:hidden p-2 rounded-lg hover:bg-white/5 transition">
+            <i data-lucide="menu" class="w-5 h-5"></i>
+          </button>
+          <div>
+            <h2 id="pageTitle" class="text-xl font-bold text-white">Dashboard</h2>
+            <p id="pageSubtitle" class="text-xs text-slate-500">Overview of your trading performance</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <button onclick="openTradeModal()" class="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition-all duration-200 shadow-lg shadow-accent/25 hover:shadow-accent/40">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            <span class="hidden sm:inline">New Trade</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Pages -->
+    <div id="page-dashboard" class="page-content p-4 lg:p-8">
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="stat-card bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-5 hover:border-white/10 transition-all duration-300">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Trades</span>
+            <div class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center">
+              <i data-lucide="hash" class="w-4 h-4 text-accent"></i>
+            </div>
+          </div>
+          <p id="statTotalTrades" class="text-2xl lg:text-3xl font-bold text-white">0</p>
+        </div>
+        <div class="stat-card bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-5 hover:border-white/10 transition-all duration-300">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-slate-500 uppercase tracking-wider">Win Rate</span>
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <i data-lucide="target" class="w-4 h-4 text-emerald-400"></i>
+            </div>
+          </div>
+          <p id="statWinRate" class="text-2xl lg:text-3xl font-bold text-white">0%</p>
+        </div>
+        <div class="stat-card bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-5 hover:border-white/10 transition-all duration-300">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total P&L</span>
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <i data-lucide="dollar-sign" class="w-4 h-4 text-emerald-400"></i>
+            </div>
+          </div>
+          <p id="statTotalPnL" class="text-2xl lg:text-3xl font-bold text-white">$0.00</p>
+        </div>
+        <div class="stat-card bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-5 hover:border-white/10 transition-all duration-300">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-slate-500 uppercase tracking-wider">Avg Trade</span>
+            <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+              <i data-lucide="scale" class="w-4 h-4 text-amber-400"></i>
+            </div>
+          </div>
+          <p id="statAvgTrade" class="text-2xl lg:text-3xl font-bold text-white">$0.00</p>
+        </div>
+      </div>
+
+      <!-- Secondary Stats -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-4">
+          <span class="text-xs text-slate-500">Best Trade</span>
+          <p id="statBestTrade" class="text-lg font-bold text-profit mt-1">$0.00</p>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-4">
+          <span class="text-xs text-slate-500">Worst Trade</span>
+          <p id="statWorstTrade" class="text-lg font-bold text-loss mt-1">$0.00</p>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-4">
+          <span class="text-xs text-slate-500">Profit Factor</span>
+          <p id="statProfitFactor" class="text-lg font-bold text-white mt-1">0.00</p>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-4">
+          <span class="text-xs text-slate-500">Avg Win / Avg Loss</span>
+          <p id="statAvgWinLoss" class="text-lg font-bold text-white mt-1">0 / 0</p>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div class="lg:col-span-2 bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Equity Curve</h3>
+          <div class="h-64 lg:h-72">
+            <canvas id="equityChart"></canvas>
+          </div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Win / Loss Distribution</h3>
+          <div class="h-64 lg:h-72 flex items-center justify-center">
+            <canvas id="winLossChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Trades -->
+      <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-semibold text-white">Recent Trades</h3>
+          <button onclick="showPage('journal')" class="text-xs text-accent hover:text-accent-light transition">View All →</button>
+        </div>
+        <div id="recentTradesContainer" class="space-y-2">
+          <p class="text-slate-500 text-sm text-center py-8">No trades yet. Click "New Trade" to get started!</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Journal Page -->
+    <div id="page-journal" class="page-content p-4 lg:p-8 hidden">
+      <!-- Filters -->
+      <div class="flex flex-wrap items-center gap-3 mb-6">
+        <div class="relative flex-1 min-w-[200px]">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
+          <input id="searchInput" type="text" placeholder="Search trades..." class="w-full pl-10 pr-4 py-2.5 bg-surface-800/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition" oninput="renderJournal()">
+        </div>
+        <select id="filterSide" class="px-4 py-2.5 bg-surface-800/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition" onchange="renderJournal()">
+          <option value="all">All Sides</option>
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+        <select id="filterResult" class="px-4 py-2.5 bg-surface-800/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition" onchange="renderJournal()">
+          <option value="all">All Results</option>
+          <option value="win">Wins</option>
+          <option value="loss">Losses</option>
+          <option value="breakeven">Breakeven</option>
+        </select>
+        <select id="filterTag" class="px-4 py-2.5 bg-surface-800/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition" onchange="renderJournal()">
+          <option value="all">All Tags</option>
+        </select>
+        <select id="sortBy" class="px-4 py-2.5 bg-surface-800/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition" onchange="renderJournal()">
+          <option value="date-desc">Newest First</option>
+          <option value="date-asc">Oldest First</option>
+          <option value="pnl-desc">Highest P&L</option>
+          <option value="pnl-asc">Lowest P&L</option>
+        </select>
+      </div>
+
+      <!-- Trade List -->
+      <div id="journalList" class="space-y-3">
+        <p class="text-slate-500 text-sm text-center py-12">No trades yet. Click "New Trade" to get started!</p>
+      </div>
+    </div>
+
+    <!-- Analytics Page -->
+    <div id="page-analytics" class="page-content p-4 lg:p-8 hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">P&L by Symbol</h3>
+          <div class="h-64">
+            <canvas id="symbolPnlChart"></canvas>
+          </div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">P&L by Tag</h3>
+          <div class="h-64">
+            <canvas id="tagPnlChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div id="sessionStats" class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6 mb-6">
+        <h3 class="text-sm font-semibold text-white mb-4">Session Stats</h3>
+        <div id="sessionStatsContent" class="flex gap-4"></div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Weekly P&L</h3>
+          <div class="h-64">
+            <canvas id="weeklyPnlChart"></canvas>
+          </div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Daily P&L</h3>
+          <div class="h-64">
+            <canvas id="dailyPnlChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+        <h3 class="text-sm font-semibold text-white mb-4">Trade Duration vs P&L</h3>
+        <div class="h-64">
+          <canvas id="durationChart"></canvas>
+        </div>
+      </div>
+      <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+        <h3 class="text-sm font-semibold text-white mb-4">Streak Analysis</h3>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">Current Streak</p>
+            <p id="streakCurrent" class="text-xl font-bold text-white">0</p>
+          </div>
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">Best Win Streak</p>
+            <p id="streakBestWin" class="text-xl font-bold text-profit">0</p>
+          </div>
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">Worst Loss Streak</p>
+            <p id="streakWorstLoss" class="text-xl font-bold text-loss">0</p>
+          </div>
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">Longest Trade</p>
+            <p id="streakLongest" class="text-xl font-bold text-white">0h</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calendar Page -->
+    <div id="page-calendar" class="page-content p-4 lg:p-8 hidden">
+      <div class="flex items-center justify-between mb-6">
+        <button onclick="changeMonth(-1)" class="p-2 rounded-lg hover:bg-white/5 transition"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+        <h3 id="calendarMonth" class="text-lg font-bold text-white"></h3>
+        <button onclick="changeMonth(1)" class="p-2 rounded-lg hover:bg-white/5 transition"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+      </div>
+      <div id="calendarGrid" class="grid grid-cols-7 gap-1"></div>
+    </div>
+
+    <!-- Settings Page -->
+    <div id="page-settings" class="page-content p-4 lg:p-8 hidden">
+      <div class="max-w-2xl space-y-6">
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Data Management</h3>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs text-slate-500 mb-2">Export Trades (JSON)</label>
+              <button onclick="exportData()" class="px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition">
+                <i data-lucide="download" class="w-4 h-4 inline mr-2"></i>Export
+              </button>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 mb-2">Import Trades (JSON)</label>
+              <input type="file" id="importFile" accept=".json" class="text-sm text-slate-400" onchange="importData(event)">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 mb-2">Export Trades (CSV)</label>
+              <button onclick="exportCSV()" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-sm font-semibold text-white transition">
+                <i data-lucide="file-spreadsheet" class="w-4 h-4 inline mr-2"></i>Export CSV
+              </button>
+            </div>
+            <div class="pt-4 border-t border-white/5">
+              <label class="block text-xs text-loss mb-2">Danger Zone</label>
+              <button onclick="clearAllData()" class="px-4 py-2.5 bg-loss/10 hover:bg-loss/20 text-loss rounded-xl text-sm font-semibold transition">
+                <i data-lucide="trash-2" class="w-4 h-4 inline mr-2"></i>Clear All Data
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Custom Tags</h3>
+          <div class="flex gap-2 mb-4">
+            <input id="newTagInput" type="text" placeholder="Add a tag..." class="flex-1 px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
+            <button onclick="addCustomTag()" class="px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition">Add</button>
+          </div>
+          <div id="tagsList" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">About</h3>
+          <p class="text-sm text-slate-400">TradeVault is a 100% offline trading journal. All your data is stored locally in your browser. No accounts, no cloud, no tracking. Your trades stay private.</p>
+          <p class="text-xs text-slate-600 mt-3">Built with ❤️ for traders who value simplicity and privacy.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- New Trade Modal -->
+  <div id="tradeModal" class="fixed inset-0 z-[100] hidden items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeTradeModal()"></div>
+    <div class="relative w-full max-w-xl bg-surface-800 border border-white/10 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="sticky top-0 bg-surface-800 px-6 py-4 border-b border-white/5 flex items-center justify-between rounded-t-2xl z-10">
+        <h3 id="modalTitle" class="text-lg font-bold text-white">New Trade</h3>
+        <button onclick="closeTradeModal()" class="p-1.5 rounded-lg hover:bg-white/5 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="tradeForm" class="p-6 space-y-5" onsubmit="saveTrade(event)">
+        <input type="hidden" id="tradeId">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Symbol *</label>
+            <input id="tradeSymbol" type="text" placeholder="AAPL" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition uppercase">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Side *</label>
+            <select id="tradeSide" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+              <option value="long">Long 📈</option>
+              <option value="short">Short 📉</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Entry Price *</label>
+            <input id="tradeEntry" type="number" step="any" placeholder="0.00" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Exit Price *</label>
+            <input id="tradeExit" type="number" step="any" placeholder="0.00" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Quantity *</label>
+            <input id="tradeQty" type="number" step="any" placeholder="0" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Fees</label>
+            <input id="tradeFees" type="number" step="any" placeholder="0.00" value="0" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Entry Date *</label>
+            <input id="tradeEntryDate" type="datetime-local" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Exit Date *</label>
+            <input id="tradeExitDate" type="datetime-local" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Tags</label>
+          <div id="modalTagsContainer" class="flex flex-wrap gap-2 mb-2"></div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Notes</label>
+          <textarea id="tradeNotes" rows="3" placeholder="Trade rationale, lessons learned..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition resize-none"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Screenshot URL</label>
+          <input id="tradeScreenshot" type="url" placeholder="https://..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+        </div>
+        <div id="pnlPreview" class="p-4 rounded-xl bg-surface-900/50 border border-white/5 text-center hidden">
+          <span class="text-xs text-slate-500">Estimated P&L</span>
+          <p id="pnlPreviewValue" class="text-2xl font-bold mt-1">$0.00</p>
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button type="button" onclick="closeTradeModal()" class="flex-1 px-4 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-sm font-semibold text-white transition">Cancel</button>
+          <button type="submit" class="flex-1 px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition shadow-lg shadow-accent/25">Save Trade</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Trade Detail Modal -->
+  <div id="tradeDetailModal" class="fixed inset-0 z-[100] hidden items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeTradeDetail()"></div>
+    <div class="relative w-full max-w-lg bg-surface-800 border border-white/10 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="sticky top-0 bg-surface-800 px-6 py-4 border-b border-white/5 flex items-center justify-between rounded-t-2xl z-10">
+        <h3 class="text-lg font-bold text-white">Trade Details</h3>
+        <button onclick="closeTradeDetail()" class="p-1.5 rounded-lg hover:bg-white/5 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div id="tradeDetailContent" class="p-6"></div>
+    </div>
+  </div>
+
+  <!-- Day Trades Modal -->
+  <div id="dayTradesModal" class="fixed inset-0 z-[100] hidden items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeDayTradesModal()"></div>
+    <div class="relative w-full max-w-lg bg-surface-800 border border-white/10 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="sticky top-0 bg-surface-800 px-6 py-4 border-b border-white/5 flex items-center justify-between rounded-t-2xl z-10">
+        <h3 id="dayTradesTitle" class="text-lg font-bold text-white"></h3>
+        <button onclick="closeDayTradesModal()" class="p-1.5 rounded-lg hover:bg-white/5 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4 p-4 rounded-xl bg-surface-900/50 border border-white/5">
+          <span class="text-xs text-slate-500 uppercase tracking-wider">Day Total</span>
+          <span id="dayTradesTotal" class="text-xl font-bold text-white"></span>
+        </div>
+        <div id="dayTradesList" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-6 right-6 z-[200] transform translate-y-20 opacity-0 transition-all duration-300">
+    <div class="px-5 py-3 bg-surface-800 border border-white/10 rounded-xl shadow-2xl text-sm font-medium text-white flex items-center gap-2">
+      <i data-lucide="check-circle" class="w-4 h-4 text-profit"></i>
+      <span id="toastMessage">Trade saved!</span>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="script.js"></script>
+  <div class="fixed bottom-4 left-4 z-[210] text-xs text-slate-500 bg-surface-900/40 px-3 py-1 rounded-lg border border-white/5">Made with Kephah</div>
+</body>
+</html>
