@@ -509,4 +509,9 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
-app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
+const port = process.env.PORT || 3000;
+
+app.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`);
+});
+
