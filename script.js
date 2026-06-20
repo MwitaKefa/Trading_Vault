@@ -85,6 +85,8 @@ async function fetchTagsFromServer() {
 async function syncFromServer() {
   try {
     const [trades, tags] = await Promise.all([fetchTradesFromServer(), fetchTagsFromServer()]);
+    await fetchAccounts();
+    populateAccountSelectors();
     return trades && tags;
   } catch (e) {
     return false;
@@ -128,6 +130,219 @@ function loadLocalData() {
   cachedTags = getTagsFromLocal();
 }
 
+// ============ ACCOUNTS ============
+const ACCOUNT_KEY = 'tradevault_account';
+let cachedAccounts = [];
+let currentAccountId = localStorage.getItem(ACCOUNT_KEY) || '';
+
+async function fetchAccounts() {
+  if (!serverAvailable) { cachedAccounts = []; return cachedAccounts; }
+  try {
+    const res = await fetch('/api/accounts');
+    if (!res.ok) throw new Error('Unable to fetch accounts');
+    cachedAccounts = await res.json();
+  } catch (e) {
+    cachedAccounts = [];
+  }
+  // Reset selection if the selected account no longer exists
+  if (currentAccountId && !cachedAccounts.some(a => a.id === currentAccountId)) {
+    currentAccountId = '';
+    localStorage.setItem(ACCOUNT_KEY, '');
+  }
+  return cachedAccounts;
+}
+
+function getCurrentAccount() {
+  return cachedAccounts.find(a => a.id === currentAccountId) || null;
+}
+
+function getAccountIdOf(trade) {
+  return trade.account_id || trade.accountId || '';
+}
+
+// Trades filtered by the currently selected account (all trades when none selected).
+function getScopedTrades() {
+  const all = getTrades();
+  if (!currentAccountId) return all;
+  return all.filter(t => getAccountIdOf(t) === currentAccountId);
+}
+
+function accountOptionsHTML(includeAll, includeNone) {
+  const opts = [];
+  if (includeAll) opts.push('<option value="">All Accounts</option>');
+  if (includeNone) opts.push('<option value="">No Account</option>');
+  cachedAccounts.forEach(a => opts.push(`<option value="${a.id}">${escapeHtml(a.name)}</option>`));
+  return opts.join('');
+}
+
+function populateAccountSelectors() {
+  const sel = document.getElementById('accountSelector');
+  if (sel) {
+    sel.innerHTML = accountOptionsHTML(true, false);
+    sel.value = currentAccountId;
+  }
+  const tradeSel = document.getElementById('tradeAccount');
+  if (tradeSel) {
+    const cur = tradeSel.value;
+    tradeSel.innerHTML = accountOptionsHTML(false, true);
+    tradeSel.value = cur;
+  }
+}
+
+function onAccountSelectChange(value) {
+  currentAccountId = value || '';
+  localStorage.setItem(ACCOUNT_KEY, currentAccountId);
+  refreshPage();
+}
+
+async function refreshAccounts() {
+  await fetchAccounts();
+  populateAccountSelectors();
+  renderAccountsList();
+}
+
+function renderAccountsList() {
+  const container = document.getElementById('accountsList');
+  if (!container) return;
+  if (!serverAvailable) {
+    container.innerHTML = '<p class="text-slate-500 text-sm text-center py-8">Account management requires the local server. Run <code>npm start</code> and reload.</p>';
+    return;
+  }
+  if (cachedAccounts.length === 0) {
+    container.innerHTML = '<p class="text-slate-500 text-sm text-center py-8">No accounts yet. Create one to get started!</p>';
+    return;
+  }
+  container.innerHTML = cachedAccounts.map(a => {
+    const pnlPct = a.accountSize ? (a.totalPnL / a.accountSize) * 100 : 0;
+    const diff = a.currentBalance - a.accountSize;
+    const diffClass = diff >= 0 ? 'text-profit' : 'text-loss';
+    return `
+      <div class="bg-surface-900/50 border border-white/5 rounded-2xl p-4">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p class="text-base font-semibold text-white">${escapeHtml(a.name)}</p>
+            <p class="text-xs text-slate-500 mt-0.5">Size $${a.accountSize.toLocaleString()} · ${a.tradeCount} trade${a.tradeCount === 1 ? '' : 's'}</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="openEditAccount('${a.id}')" class="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-semibold text-white transition">Edit</button>
+            <button onclick="deleteAccount('${a.id}')" class="px-3 py-1.5 bg-loss/10 hover:bg-loss/20 text-loss rounded-lg text-xs font-semibold transition">Delete</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3 mt-4">
+          <div>
+            <p class="text-[11px] text-slate-500 uppercase tracking-wide">Running Balance</p>
+            <p class="text-sm font-bold text-white mt-0.5">$${a.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-slate-500 uppercase tracking-wide">Total P&L</p>
+            <p class="text-sm font-bold ${a.totalPnL >= 0 ? 'text-profit' : 'text-loss'} mt-0.5">${formatCurrency(a.totalPnL)}</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-slate-500 uppercase tracking-wide">P&L %</p>
+            <p class="text-sm font-bold ${diffClass} mt-0.5">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</p>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  lucide.createIcons();
+}
+
+async function createAccount(e) {
+  e.preventDefault();
+  if (!serverAvailable) { showToast('Server required to manage accounts'); return; }
+  const name = document.getElementById('accName').value.trim();
+  const accountSize = parseFloat(document.getElementById('accSize').value);
+  const currentBalance = parseFloat(document.getElementById('accBalance').value);
+  if (!name || isNaN(accountSize)) { showToast('Name and account size are required'); return; }
+  try {
+    const res = await fetch('/api/accounts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, accountSize, currentBalance: isNaN(currentBalance) ? accountSize : currentBalance })
+    });
+    if (!res.ok) throw new Error('fail');
+    document.getElementById('accountForm').reset();
+    showToast('Account created!');
+    await refreshAccounts();
+  } catch (e) {
+    showToast('Failed to create account');
+  }
+}
+
+function openEditAccount(id) {
+  const a = cachedAccounts.find(x => x.id === id);
+  if (!a) return;
+  document.getElementById('editAccId').value = a.id;
+  document.getElementById('editAccName').value = a.name;
+  document.getElementById('editAccBalance').value = '';
+  document.getElementById('editAccountModal').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closeEditAccount() {
+  document.getElementById('editAccountModal').classList.add('hidden');
+}
+
+async function saveAccountEdit(e) {
+  e.preventDefault();
+  const id = document.getElementById('editAccId').value;
+  const name = document.getElementById('editAccName').value.trim();
+  const balRaw = document.getElementById('editAccBalance').value;
+  const body = { name };
+  if (balRaw !== '') body.currentBalance = parseFloat(balRaw);
+  try {
+    const res = await fetch(`/api/accounts/${encodeURIComponent(id)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error('fail');
+    closeEditAccount();
+    showToast('Account updated!');
+    await refreshAccounts();
+    refreshPage();
+  } catch (e) {
+    showToast('Failed to update account');
+  }
+}
+
+async function deleteAccount(id) {
+  if (!confirm('Delete this account? Its balance snapshots will be removed and its trades will be detached.')) return;
+  try {
+    await fetch(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (currentAccountId === id) {
+      currentAccountId = '';
+      localStorage.setItem(ACCOUNT_KEY, '');
+    }
+    showToast('Account deleted');
+    await refreshAccounts();
+    refreshPage();
+  } catch (e) {
+    showToast('Failed to delete account');
+  }
+}
+
+// Dashboard summary card for the selected account.
+function renderAccountSummary() {
+  const card = document.getElementById('accountSummaryCard');
+  if (!card) return;
+  const a = getCurrentAccount();
+  if (!a) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  document.getElementById('summaryAccountName').textContent = a.name;
+  document.getElementById('summaryAccountSize').textContent = '$' + a.accountSize.toLocaleString();
+  document.getElementById('summaryRunningBalance').textContent =
+    '$' + a.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const diff = a.currentBalance - a.accountSize;
+  const pct = a.accountSize ? (diff / a.accountSize) * 100 : 0;
+  const el = document.getElementById('summaryDrawdown');
+  const amount = Math.abs(diff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (diff < 0) {
+    el.className = 'px-4 py-2 rounded-xl text-sm font-semibold bg-loss/10 text-loss';
+    el.textContent = `In Drawdown: -$${amount} (${pct.toFixed(2)}%)`;
+  } else {
+    el.className = 'px-4 py-2 rounded-xl text-sm font-semibold bg-profit/10 text-profit';
+    el.textContent = `In Profit: +$${amount} (+${pct.toFixed(2)}%)`;
+  }
+}
+
 // ============ NAVIGATION ============
 let currentPage = 'dashboard';
 
@@ -144,6 +359,7 @@ function showPage(page) {
     journal: ['Journal', 'All your trades in one place'],
     analytics: ['Analytics', 'Deep dive into your trading patterns'],
     calendar: ['Calendar', 'View trades by date'],
+    accounts: ['Accounts', 'Manage your prop firm accounts'],
     settings: ['Settings', 'Manage your data and preferences']
   };
   document.getElementById('pageTitle').textContent = titles[page][0];
@@ -177,12 +393,15 @@ function openTradeModal(tradeId = null) {
 
   // Build tags
   renderModalTags();
+  populateAccountSelectors();
 
   if (tradeId) {
     const trades = getTrades();
     const trade = trades.find(t => t.id === tradeId);
     if (trade) {
       document.getElementById('tradeId').value = trade.id;
+      document.getElementById('tradeAccount').value = getAccountIdOf(trade);
+      document.getElementById('tradeStopLoss').value = (trade.stop_loss_size != null ? trade.stop_loss_size : '');
       document.getElementById('tradeSymbol').value = trade.symbol;
       document.getElementById('tradeSide').value = trade.side;
       document.getElementById('tradeEntry').value = trade.entryPrice;
@@ -200,6 +419,8 @@ function openTradeModal(tradeId = null) {
     document.getElementById('tradeForm').reset();
     document.getElementById('tradeId').value = '';
     document.getElementById('tradeFees').value = 0;
+    document.getElementById('tradeStopLoss').value = '';
+    document.getElementById('tradeAccount').value = currentAccountId || '';
     // Set default dates to now
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -208,7 +429,32 @@ function openTradeModal(tradeId = null) {
     document.getElementById('tradeExitDate').value = dateStr;
   }
   updatePnlPreview();
+  updateRiskPreview();
   lucide.createIcons();
+}
+
+// Live risk preview against the selected account's running balance.
+function updateRiskPreview() {
+  const accId = document.getElementById('tradeAccount').value;
+  const sls = parseFloat(document.getElementById('tradeStopLoss').value);
+  const box = document.getElementById('riskPreview');
+  const val = document.getElementById('riskPreviewValue');
+  const note = document.getElementById('riskPreviewNote');
+  if (!box) return;
+  const acc = cachedAccounts.find(a => a.id === accId);
+  if (!accId || !acc || !sls || isNaN(sls) || !acc.currentBalance) {
+    box.classList.add('hidden');
+    return;
+  }
+  const risk = (sls / acc.currentBalance) * 100;
+  box.classList.remove('hidden');
+  let color, label;
+  if (risk > 1.0) { color = 'text-loss'; label = 'VIOLATION — exceeds 1.0% max risk'; }
+  else if (risk < 0.2) { color = 'text-amber-400'; label = 'TOO CONSERVATIVE — below 0.2%'; }
+  else { color = 'text-profit'; label = 'OK — within 0.2%–1.0%'; }
+  val.className = 'text-sm font-bold ' + color;
+  val.textContent = risk.toFixed(2) + '%';
+  note.textContent = `${label} · Running balance $${acc.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function closeTradeModal() {
@@ -257,6 +503,12 @@ function updatePnlPreview() {
   document.getElementById(id)?.addEventListener('input', updatePnlPreview);
 });
 
+// Listen for risk preview updates
+['tradeStopLoss', 'tradeAccount'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', updateRiskPreview);
+  document.getElementById(id)?.addEventListener('change', updateRiskPreview);
+});
+
 async function saveTrade(e) {
   e.preventDefault();
   const id = document.getElementById('tradeId').value || generateId();
@@ -268,6 +520,20 @@ async function saveTrade(e) {
 
   let pnl = side === 'long' ? (exit - entry) * qty - fees : (entry - exit) * qty - fees;
   let pnlPercent = side === 'long' ? ((exit - entry) / entry) * 100 : ((entry - exit) / entry) * 100;
+
+  // Account + risk fields
+  const accountId = document.getElementById('tradeAccount').value || null;
+  const slsRaw = parseFloat(document.getElementById('tradeStopLoss').value);
+  const stopLossSize = isNaN(slsRaw) ? null : slsRaw;
+  let riskPercentage = null;
+  let riskFlag = null;
+  if (accountId && stopLossSize != null) {
+    const acc = cachedAccounts.find(a => a.id === accountId);
+    if (acc && acc.currentBalance) {
+      riskPercentage = Math.round((stopLossSize / acc.currentBalance) * 100 * 10000) / 10000;
+      riskFlag = riskPercentage > 1.0 ? 'violation' : riskPercentage < 0.2 ? 'conservative' : 'ok';
+    }
+  }
 
   const trade = {
     id,
@@ -284,7 +550,11 @@ async function saveTrade(e) {
     screenshot: document.getElementById('tradeScreenshot').value,
     pnl,
     pnlPercent: Math.round(pnlPercent * 100) / 100,
-    result: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven'
+    result: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven',
+    account_id: accountId,
+    stop_loss_size: stopLossSize,
+    risk_percentage: riskPercentage,
+    risk_flag: riskFlag
   };
 
   const trades = getTrades();
@@ -354,6 +624,16 @@ function openTradeDetail(tradeId) {
         <span class="text-xs text-slate-500">Duration</span>
         <p class="text-sm font-semibold text-white mt-0.5">${durationH}h</p>
       </div>
+      ${trade.stop_loss_size != null ? `
+      <div class="bg-surface-900/50 rounded-xl p-3">
+        <span class="text-xs text-slate-500">Stop Loss Size</span>
+        <p class="text-sm font-semibold text-white mt-0.5">$${Number(trade.stop_loss_size).toFixed(2)}</p>
+      </div>` : ''}
+      ${trade.risk_percentage != null ? `
+      <div class="bg-surface-900/50 rounded-xl p-3">
+        <span class="text-xs text-slate-500">Risk</span>
+        <p class="text-sm font-semibold mt-0.5 ${riskFlagClass(trade.risk_flag)}">${Number(trade.risk_percentage).toFixed(2)}% · ${riskFlagLabel(trade.risk_flag)}</p>
+      </div>` : ''}
     </div>
     <div class="bg-surface-900/50 rounded-xl p-3 mb-4">
       <span class="text-xs text-slate-500">Entry → Exit</span>
@@ -390,7 +670,8 @@ async function deleteTrade(id) {
 
 // ============ DASHBOARD ============
 function refreshDashboard() {
-  const trades = getTrades();
+  renderAccountSummary();
+  const trades = getScopedTrades();
   const wins = trades.filter(t => t.pnl > 0);
   const losses = trades.filter(t => t.pnl < 0);
 
@@ -465,7 +746,7 @@ function updateFilterTags() {
 }
 
 function renderJournal() {
-  let trades = getTrades();
+  let trades = getScopedTrades();
   const search = document.getElementById('searchInput').value.toLowerCase();
   const side = document.getElementById('filterSide').value;
   const result = document.getElementById('filterResult').value;
@@ -519,8 +800,8 @@ function renderJournal() {
 let calendarDate = new Date();
 
 function refreshCalendar() {
-  // If server available, fetch daily stats for the current month
-  if (serverAvailable) {
+  // Account-scoped calendar is computed locally; the global view uses server stats.
+  if (serverAvailable && !currentAccountId) {
     const year = calendarDate.getFullYear();
     const month = calendarDate.getMonth();
     fetch(`/api/stats/daily?year=${year}&month=${month}`).then(r => r.json()).then(data => {
@@ -568,7 +849,7 @@ function renderCalendar() {
 
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const trades = getTrades();
+  const trades = getScopedTrades();
 
   // Group trades by day
   const tradesByDay = {};
@@ -608,7 +889,7 @@ function renderCalendar() {
 }
 
 function showDayTrades(year, month, day) {
-  const trades = getTrades().filter(t => {
+  const trades = getScopedTrades().filter(t => {
     const d = new Date(t.exitDate);
     return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day;
   });
@@ -634,7 +915,7 @@ function closeDayTradesModal() {
 
 // ============ ANALYTICS ============
 function refreshAnalytics() {
-  const trades = getTrades();
+  const trades = getScopedTrades();
   renderSymbolPnlChart(trades);
   renderTagPnlChart(trades);
   renderDailyPnlChart(trades);
@@ -642,13 +923,14 @@ function refreshAnalytics() {
   renderDurationChart(trades);
   renderStreakAnalysis(trades);
   renderWeeklySessionSummary();
+  renderRiskAnalytics();
 }
 
 function renderWeeklyPnlChart(trades) {
   destroyChart('weeklyPnl');
   const year = new Date().getFullYear();
   const month = new Date().getMonth();
-  if (serverAvailable) {
+  if (serverAvailable && !currentAccountId) {
     fetch(`/api/stats/weekly?year=${year}&month=${month}`).then(r => r.json()).then(weeks => {
       const labels = weeks.map(w => `W${w.week}`);
       const data = weeks.map(w => w.pnl);
@@ -696,7 +978,7 @@ function renderWeeklySessionSummary() {
   const el = document.getElementById('sessionStatsContent');
   if (!el) return;
   el.innerHTML = '';
-  if (serverAvailable) {
+  if (serverAvailable && !currentAccountId) {
     fetch('/api/stats/sessions').then(r => r.json()).then(data => {
       Object.entries(data).forEach(([k, v]) => {
         const div = document.createElement('div');
@@ -714,7 +996,7 @@ function renderWeeklySessionSummaryLocal() {
   const el = document.getElementById('sessionStatsContent');
   if (!el) return;
   el.innerHTML = '';
-  const trades = getTrades();
+  const trades = getScopedTrades();
   const sessions = { premarket: { count: 0, wins: 0 }, market: { count: 0, wins: 0 }, postmarket: { count: 0, wins: 0 } };
   trades.forEach(r => {
     const d = new Date(r.entryDate || r.exitDate);
@@ -966,6 +1248,190 @@ function renderStreakAnalysis(trades) {
   document.getElementById('streakLongest').textContent = longestDuration.toFixed(1) + 'h';
 }
 
+// ============ PROP FIRM RISK ANALYTICS ============
+function riskFlagClass(flag) {
+  if (flag === 'violation') return 'text-loss';
+  if (flag === 'conservative') return 'text-amber-400';
+  if (flag === 'ok') return 'text-profit';
+  return 'text-slate-400';
+}
+function riskFlagLabel(flag) {
+  if (flag === 'violation') return 'VIOLATION';
+  if (flag === 'conservative') return 'TOO CONSERVATIVE';
+  if (flag === 'ok') return 'OK';
+  return '—';
+}
+
+// Constant horizontal reference line as a Chart.js dataset.
+function referenceLineDataset(label, value, count, color) {
+  return {
+    label,
+    data: new Array(count).fill(value),
+    borderColor: color,
+    borderWidth: 1.5,
+    borderDash: [6, 4],
+    pointRadius: 0,
+    fill: false,
+    tension: 0,
+  };
+}
+
+async function renderRiskAnalytics() {
+  const hint = document.getElementById('riskAnalyticsHint');
+  const content = document.getElementById('riskAnalyticsContent');
+  if (!hint || !content) return;
+  if (!currentAccountId || !serverAvailable) {
+    hint.classList.remove('hidden');
+    content.classList.add('hidden');
+    destroyChart('acctEquity');
+    destroyChart('acctDaily');
+    destroyChart('acctRisk');
+    return;
+  }
+  try {
+    const res = await fetch(`/api/accounts/${encodeURIComponent(currentAccountId)}/analytics`);
+    if (!res.ok) throw new Error('fail');
+    const data = await res.json();
+    hint.classList.add('hidden');
+    content.classList.remove('hidden');
+    renderAcctEquityChart(data);
+    renderAcctDailyPnlChart(data);
+    renderAcctRiskChart(data);
+    renderRiskRecommendation(data);
+  } catch (e) {
+    hint.classList.remove('hidden');
+    content.classList.add('hidden');
+  }
+}
+
+function renderAcctEquityChart(data) {
+  destroyChart('acctEquity');
+  const canvas = document.getElementById('acctEquityChart');
+  if (!canvas) return;
+  const points = data.equityCurve || [];
+  const labels = points.map(p => new Date(p.x).toLocaleDateString());
+  const balances = points.map(p => p.y);
+  const datasets = [{
+    label: 'Running Balance',
+    data: balances,
+    borderColor: '#6366f1',
+    backgroundColor: 'rgba(99,102,241,0.1)',
+    fill: true,
+    tension: 0.3,
+    pointRadius: 2,
+    borderWidth: 2,
+  }];
+  if (labels.length > 0 && data.accountSize != null) {
+    datasets.push(referenceLineDataset('Account Size', data.accountSize, labels.length, '#94a3b8'));
+  }
+  charts.acctEquity = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      ...chartDefaults,
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 }, padding: 12 } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}` } }
+      }
+    }
+  });
+}
+
+function renderAcctDailyPnlChart(data) {
+  destroyChart('acctDaily');
+  const canvas = document.getElementById('acctDailyPnlChart');
+  if (!canvas) return;
+  const days = data.dailyPnL || [];
+  const labels = days.map(d => new Date(d.date).toLocaleDateString());
+  const values = days.map(d => d.pnl);
+  const colors = values.map(v => v >= 0 ? '#22c55e' : '#ef4444');
+  charts.acctDaily = new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 6 }] },
+    options: {
+      ...chartDefaults,
+      plugins: { ...chartDefaults.plugins, tooltip: { callbacks: { label: ctx => formatCurrency(ctx.parsed.y) } } }
+    }
+  });
+}
+
+function renderAcctRiskChart(data) {
+  destroyChart('acctRisk');
+  const canvas = document.getElementById('acctRiskChart');
+  if (!canvas) return;
+  const points = data.riskTrend || [];
+  const labels = points.map(p => `#${p.tradeNumber}`);
+  const values = points.map(p => p.risk);
+  const datasets = [{
+    label: 'Risk %',
+    data: values,
+    borderColor: '#818cf8',
+    backgroundColor: 'rgba(129,140,248,0.1)',
+    fill: false,
+    tension: 0.3,
+    pointRadius: 3,
+    pointBackgroundColor: values.map(v => v > 1.0 ? '#ef4444' : v < 0.2 ? '#f59e0b' : '#22c55e'),
+    borderWidth: 2,
+  }];
+  if (labels.length > 0) {
+    datasets.push(referenceLineDataset('1.0% Max', 1.0, labels.length, '#ef4444'));
+    datasets.push(referenceLineDataset('0.2% Min', 0.2, labels.length, '#f59e0b'));
+  }
+  charts.acctRisk = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      ...chartDefaults,
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 }, padding: 12 } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}%` } }
+      }
+    }
+  });
+}
+
+// Size Up / Size Down / Maintain recommendation based on recent balance + risk.
+function renderRiskRecommendation(data) {
+  const el = document.getElementById('riskRecommendation');
+  if (!el) return;
+  const balances = (data.equityCurve || []).map(p => p.y);
+  const risks = (data.riskTrend || []).map(p => p.risk);
+  const account = getCurrentAccount();
+
+  if (balances.length < 2 || risks.length === 0) {
+    el.classList.add('hidden');
+    return;
+  }
+
+  const recentBalances = balances.slice(-11); // up to last 10 trades
+  const startBal = recentBalances[0];
+  const endBal = recentBalances[recentBalances.length - 1];
+  const balanceChangePct = startBal ? ((endBal - startBal) / startBal) * 100 : 0;
+
+  const recentRisks = risks.slice(-10);
+  const avgRisk = recentRisks.reduce((s, r) => s + r, 0) / recentRisks.length;
+
+  const inDrawdown = account ? account.currentBalance < account.accountSize : false;
+
+  let text, cls;
+  if (inDrawdown && avgRisk >= 0.9) {
+    text = '📉 RECOMMENDATION: SIZE DOWN. Reduce risk to 0.5% until recovering from drawdown.';
+    cls = 'bg-loss/10 text-loss';
+  } else if (balanceChangePct > 5 && avgRisk < 0.6) {
+    text = '📈 RECOMMENDATION: SIZE UP. Consider increasing lot size to target 0.8% risk.';
+    cls = 'bg-profit/10 text-profit';
+  } else if (avgRisk >= 0.5 && avgRisk <= 0.9 && Math.abs(balanceChangePct) <= 5) {
+    text = '✅ RECOMMENDATION: MAINTAIN. Risk allocation is optimal.';
+    cls = 'bg-accent/10 text-accent-light';
+  } else {
+    text = `Avg risk ${avgRisk.toFixed(2)}% over last ${recentRisks.length} trade(s), balance ${balanceChangePct >= 0 ? '+' : ''}${balanceChangePct.toFixed(1)}%. No strong signal — keep monitoring discipline.`;
+    cls = 'bg-white/5 text-slate-400';
+  }
+  el.className = 'mt-4 p-4 rounded-xl text-sm font-medium ' + cls;
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+
 // ============ SETTINGS ============
 function refreshSettings() {
   renderTagsList();
@@ -1114,36 +1580,23 @@ function showToast(msg) {
 }
 
 // ============ REFRESH ============
+function renderCurrentPage() {
+  switch (currentPage) {
+    case 'dashboard': refreshDashboard(); break;
+    case 'journal': refreshJournal(); break;
+    case 'analytics': refreshAnalytics(); break;
+    case 'calendar': refreshCalendar(); break;
+    case 'accounts': refreshAccounts(); break;
+    case 'settings': refreshSettings(); break;
+  }
+  lucide.createIcons();
+}
+
 function refreshPage() {
   if (serverAvailable) {
-    syncFromServer().then(() => {
-      switch (currentPage) {
-        case 'dashboard': refreshDashboard(); break;
-        case 'journal': refreshJournal(); break;
-        case 'analytics': refreshAnalytics(); break;
-        case 'calendar': refreshCalendar(); break;
-        case 'settings': refreshSettings(); break;
-      }
-      lucide.createIcons();
-    }).catch(() => {
-      switch (currentPage) {
-        case 'dashboard': refreshDashboard(); break;
-        case 'journal': refreshJournal(); break;
-        case 'analytics': refreshAnalytics(); break;
-        case 'calendar': refreshCalendar(); break;
-        case 'settings': refreshSettings(); break;
-      }
-      lucide.createIcons();
-    });
+    syncFromServer().then(renderCurrentPage).catch(renderCurrentPage);
   } else {
-    switch (currentPage) {
-      case 'dashboard': refreshDashboard(); break;
-      case 'journal': refreshJournal(); break;
-      case 'analytics': refreshAnalytics(); break;
-      case 'calendar': refreshCalendar(); break;
-      case 'settings': refreshSettings(); break;
-    }
-    lucide.createIcons();
+    renderCurrentPage();
   }
 }
 
@@ -1168,6 +1621,7 @@ document.addEventListener('DOMContentLoaded', () => {
       closeTradeModal();
       closeTradeDetail();
       closeDayTradesModal();
+      closeEditAccount();
     }
   });
 });
