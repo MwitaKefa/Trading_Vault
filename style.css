@@ -35,7 +35,7 @@ html { scroll-behavior: smooth; }
 }
 
 /* Modal animation */
-#tradeModal:not(.hidden), #tradeDetailModal:not(.hidden), #dayTradesModal:not(.hidden) {
+#tradeModal:not(.hidden), #tradeDetailModal:not(.hidden), #dayTradesModal:not(.hidden), #editAccountModal:not(.hidden) {
   display: flex;
   animation: modalIn 0.2s ease;
 }
