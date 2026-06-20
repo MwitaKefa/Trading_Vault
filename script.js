@@ -2,7 +2,7 @@
 const STORAGE_KEY = 'tradevault_trades';
 const TAGS_KEY = 'tradevault_tags';
 
-const DEFAULT_TAGS = ['Scalp', 'Swing', 'Day Trade', 'Breakout', 'Reversal', 'Trend Follow', 'News', 'Earnings'];
+const DEFAULT_TAGS = ['Scalp', 'Swing', 'Day Trade', 'Breakout', 'Reversal', 'Trend Follow', 'News', 'Earnings', 'Community Trade', 'Liquidity Sweep'];
 
 let cachedTrades = [];
 let cachedTags = [...DEFAULT_TAGS];
@@ -20,7 +20,11 @@ function saveTradesToLocal(trades) {
 function getTagsFromLocal() {
   try {
     const tags = JSON.parse(localStorage.getItem(TAGS_KEY));
-    return tags || DEFAULT_TAGS;
+    if (!tags) return DEFAULT_TAGS;
+    // Merge in any new default tags (e.g. added in app updates) that aren't already present.
+    const merged = [...tags];
+    DEFAULT_TAGS.forEach(t => { if (!merged.includes(t)) merged.push(t); });
+    return merged;
   } catch { return DEFAULT_TAGS; }
 }
 
@@ -412,6 +416,14 @@ function openTradeModal(tradeId = null) {
       document.getElementById('tradeExitDate').value = trade.exitDate;
       document.getElementById('tradeNotes').value = trade.notes || '';
       document.getElementById('tradeScreenshot').value = trade.screenshot || '';
+      document.getElementById('tradePlannedSL').value = (trade.planned_sl != null ? trade.planned_sl : '');
+      document.getElementById('tradePlannedTP').value = (trade.planned_tp != null ? trade.planned_tp : '');
+      document.getElementById('tradeActualSL').value = (trade.actual_sl != null ? trade.actual_sl : '');
+      document.getElementById('tradeActualPnl').value = (trade.actual_pnl != null ? trade.actual_pnl : '');
+      document.getElementById('tradeEmotion').value = trade.emotion || '';
+      document.getElementById('tradeLesson').value = trade.lesson || '';
+      applyStarRating('confidence', trade.confidence || 0);
+      applyStarRating('discipline', trade.discipline || 0);
       selectedModalTags = trade.tags ? [...trade.tags] : [];
       renderModalTags();
     }
@@ -420,7 +432,15 @@ function openTradeModal(tradeId = null) {
     document.getElementById('tradeId').value = '';
     document.getElementById('tradeFees').value = 0;
     document.getElementById('tradeStopLoss').value = '';
+    document.getElementById('tradePlannedSL').value = '';
+    document.getElementById('tradePlannedTP').value = '';
+    document.getElementById('tradeActualSL').value = '';
+    document.getElementById('tradeActualPnl').value = '';
+    document.getElementById('tradeEmotion').value = '';
+    document.getElementById('tradeLesson').value = '';
     document.getElementById('tradeAccount').value = currentAccountId || '';
+    applyStarRating('confidence', 0);
+    applyStarRating('discipline', 0);
     // Set default dates to now
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -430,7 +450,118 @@ function openTradeModal(tradeId = null) {
   }
   updatePnlPreview();
   updateRiskPreview();
+  updatePlannedRR();
+  updateActualPnlNote();
   lucide.createIcons();
+}
+
+// Reset all fields in the open modal without closing it (keeps account selection and trade id).
+function clearTradeForm() {
+  document.getElementById('tradeForm').reset();
+  document.getElementById('tradeFees').value = 0;
+  document.getElementById('tradeStopLoss').value = '';
+  document.getElementById('tradePlannedSL').value = '';
+  document.getElementById('tradePlannedTP').value = '';
+  document.getElementById('tradeActualSL').value = '';
+  document.getElementById('tradeActualPnl').value = '';
+  document.getElementById('tradeEmotion').value = '';
+  document.getElementById('tradeLesson').value = '';
+  selectedModalTags = [];
+  renderModalTags();
+  applyStarRating('confidence', 0);
+  applyStarRating('discipline', 0);
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  const dateStr = now.toISOString().slice(0, 16);
+  document.getElementById('tradeEntryDate').value = dateStr;
+  document.getElementById('tradeExitDate').value = dateStr;
+  updatePnlPreview();
+  updateRiskPreview();
+  updatePlannedRR();
+  updateActualPnlNote();
+  showToast('Form cleared');
+}
+
+// ---- Star rating widget (Confidence / Discipline) ----
+function applyStarRating(field, val) {
+  const inputId = field === 'confidence' ? 'tradeConfidence' : 'tradeDiscipline';
+  const containerId = field === 'confidence' ? 'confidenceStars' : 'disciplineStars';
+  const input = document.getElementById(inputId);
+  const container = document.getElementById(containerId);
+  if (!input || !container) return;
+  input.value = val;
+  container.querySelectorAll('.star-btn').forEach(btn => {
+    const v = parseInt(btn.dataset.val);
+    if (v <= val) {
+      btn.classList.remove('text-slate-700');
+      btn.classList.add('text-amber-400');
+    } else {
+      btn.classList.remove('text-amber-400');
+      btn.classList.add('text-slate-700');
+    }
+  });
+}
+
+function setStarRating(field, val) {
+  const inputId = field === 'confidence' ? 'tradeConfidence' : 'tradeDiscipline';
+  const current = parseInt(document.getElementById(inputId)?.value) || 0;
+  // Clicking the currently-selected star clears the rating.
+  applyStarRating(field, current === val ? 0 : val);
+}
+
+// ---- Planned pip risk/reward + R:R readout ----
+function getPipMultiplier(symbol) {
+  if (!symbol) return 10000;
+  const s = symbol.toUpperCase();
+  if (s.includes('JPY')) return 100;
+  if (/^[A-Z]{6}$/.test(s) || s.includes('/')) return 10000; // forex-style pair
+  return 1; // stocks, indices, crypto, etc. — treat as raw price points
+}
+
+function updatePlannedRR() {
+  const entry = parseFloat(document.getElementById('tradeEntry').value);
+  const sl = parseFloat(document.getElementById('tradePlannedSL').value);
+  const tp = parseFloat(document.getElementById('tradePlannedTP').value);
+  const side = document.getElementById('tradeSide').value;
+  const symbol = document.getElementById('tradeSymbol').value;
+  const mult = getPipMultiplier(symbol);
+  const unitLabel = mult === 1 ? 'pts' : 'pips';
+
+  const riskNote = document.getElementById('plannedRiskNote');
+  const rewardNote = document.getElementById('plannedRewardNote');
+  const rrValue = document.getElementById('plannedRRValue');
+  if (!riskNote || !rewardNote || !rrValue) return;
+
+  let riskUnits = null, rewardUnits = null;
+  if (!isNaN(entry) && !isNaN(sl)) {
+    riskUnits = Math.abs((side === 'short' ? sl - entry : entry - sl) * mult);
+    riskNote.textContent = `Risk: ${riskUnits.toFixed(mult === 1 ? 2 : 1)} ${unitLabel}`;
+  } else {
+    riskNote.textContent = '';
+  }
+  if (!isNaN(entry) && !isNaN(tp)) {
+    rewardUnits = Math.abs((side === 'short' ? entry - tp : tp - entry) * mult);
+    rewardNote.textContent = `Reward: ${rewardUnits.toFixed(mult === 1 ? 2 : 1)} ${unitLabel}`;
+  } else {
+    rewardNote.textContent = '';
+  }
+  if (riskUnits != null && rewardUnits != null && riskUnits > 0) {
+    const ratio = rewardUnits / riskUnits;
+    rrValue.textContent = `1 : ${ratio.toFixed(2)}`;
+    rrValue.className = 'font-bold ' + (ratio >= 2 ? 'text-profit' : ratio >= 1 ? 'text-amber-400' : 'text-loss');
+  } else {
+    rrValue.textContent = '—';
+    rrValue.className = 'font-bold text-slate-300';
+  }
+}
+
+function updateActualPnlNote() {
+  const note = document.getElementById('actualPnlNote');
+  const field = document.getElementById('tradeActualPnl');
+  if (!note || !field) return;
+  note.textContent = field.value !== ''
+    ? 'This value will be saved as the final P&L.'
+    : 'Calculated P&L (below) will be saved if left blank.';
 }
 
 // Live risk preview against the selected account's running balance.
@@ -509,6 +640,15 @@ function updatePnlPreview() {
   document.getElementById(id)?.addEventListener('change', updateRiskPreview);
 });
 
+// Listen for planned pip risk/reward + R:R updates
+['tradeEntry', 'tradePlannedSL', 'tradePlannedTP', 'tradeSide', 'tradeSymbol'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', updatePlannedRR);
+  document.getElementById(id)?.addEventListener('change', updatePlannedRR);
+});
+
+// Listen for actual P&L override note
+document.getElementById('tradeActualPnl')?.addEventListener('input', updateActualPnlNote);
+
 async function saveTrade(e) {
   e.preventDefault();
   const id = document.getElementById('tradeId').value || generateId();
@@ -518,8 +658,13 @@ async function saveTrade(e) {
   const qty = parseFloat(document.getElementById('tradeQty').value);
   const fees = parseFloat(document.getElementById('tradeFees').value) || 0;
 
-  let pnl = side === 'long' ? (exit - entry) * qty - fees : (entry - exit) * qty - fees;
+  let calculatedPnl = side === 'long' ? (exit - entry) * qty - fees : (entry - exit) * qty - fees;
   let pnlPercent = side === 'long' ? ((exit - entry) / entry) * 100 : ((entry - exit) / entry) * 100;
+
+  // Actual P&L (from broker) overrides the calculated value when provided.
+  const actualPnlRaw = document.getElementById('tradeActualPnl').value;
+  const actualPnl = actualPnlRaw === '' ? null : parseFloat(actualPnlRaw);
+  const finalPnl = (actualPnl != null && !isNaN(actualPnl)) ? actualPnl : calculatedPnl;
 
   // Account + risk fields
   const accountId = document.getElementById('tradeAccount').value || null;
@@ -535,6 +680,17 @@ async function saveTrade(e) {
     }
   }
 
+  // Planned trade levels
+  const plannedSLRaw = parseFloat(document.getElementById('tradePlannedSL').value);
+  const plannedTPRaw = parseFloat(document.getElementById('tradePlannedTP').value);
+  const actualSLRaw = parseFloat(document.getElementById('tradeActualSL').value);
+
+  // Psychology fields
+  const confidence = parseInt(document.getElementById('tradeConfidence').value) || 0;
+  const discipline = parseInt(document.getElementById('tradeDiscipline').value) || 0;
+  const emotion = document.getElementById('tradeEmotion').value;
+  const lesson = document.getElementById('tradeLesson').value;
+
   const trade = {
     id,
     symbol: document.getElementById('tradeSymbol').value.toUpperCase(),
@@ -548,13 +704,21 @@ async function saveTrade(e) {
     tags: [...selectedModalTags],
     notes: document.getElementById('tradeNotes').value,
     screenshot: document.getElementById('tradeScreenshot').value,
-    pnl,
+    pnl: finalPnl,
     pnlPercent: Math.round(pnlPercent * 100) / 100,
-    result: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven',
+    result: finalPnl > 0 ? 'win' : finalPnl < 0 ? 'loss' : 'breakeven',
     account_id: accountId,
     stop_loss_size: stopLossSize,
     risk_percentage: riskPercentage,
-    risk_flag: riskFlag
+    risk_flag: riskFlag,
+    planned_sl: isNaN(plannedSLRaw) ? null : plannedSLRaw,
+    planned_tp: isNaN(plannedTPRaw) ? null : plannedTPRaw,
+    actual_sl: isNaN(actualSLRaw) ? null : actualSLRaw,
+    actual_pnl: actualPnl,
+    confidence,
+    discipline,
+    emotion,
+    lesson
   };
 
   const trades = getTrades();
@@ -609,7 +773,7 @@ function openTradeDetail(tradeId) {
         <p class="text-sm font-semibold text-white mt-0.5">$${trade.exitPrice.toFixed(2)}</p>
       </div>
       <div class="bg-surface-900/50 rounded-xl p-3">
-        <span class="text-xs text-slate-500">Quantity</span>
+        <span class="text-xs text-slate-500">Lots</span>
         <p class="text-sm font-semibold text-white mt-0.5">${trade.quantity}</p>
       </div>
       <div class="bg-surface-900/50 rounded-xl p-3">
@@ -640,6 +804,23 @@ function openTradeDetail(tradeId) {
       <p class="text-xs text-slate-400 mt-0.5">${entryD.toLocaleString()} → ${exitD.toLocaleString()}</p>
     </div>
     ${trade.tags && trade.tags.length > 0 ? `<div class="flex flex-wrap gap-2 mb-4">${trade.tags.map(t => `<span class="px-2.5 py-1 rounded-full bg-accent/10 text-accent-light text-xs font-medium">${t}</span>`).join('')}</div>` : ''}
+    ${(trade.planned_sl != null || trade.planned_tp != null || trade.actual_sl != null) ? `
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      ${trade.planned_sl != null ? `<div class="bg-surface-900/50 rounded-xl p-3"><span class="text-xs text-slate-500">Planned SL</span><p class="text-sm font-semibold text-white mt-0.5">${trade.planned_sl}</p></div>` : ''}
+      ${trade.planned_tp != null ? `<div class="bg-surface-900/50 rounded-xl p-3"><span class="text-xs text-slate-500">Planned TP</span><p class="text-sm font-semibold text-white mt-0.5">${trade.planned_tp}</p></div>` : ''}
+      ${trade.actual_sl != null ? `<div class="bg-surface-900/50 rounded-xl p-3"><span class="text-xs text-slate-500">Actual SL</span><p class="text-sm font-semibold text-white mt-0.5">${trade.actual_sl}</p></div>` : ''}
+      ${trade.actual_pnl != null ? `<div class="bg-surface-900/50 rounded-xl p-3"><span class="text-xs text-slate-500">Actual P&L (broker)</span><p class="text-sm font-semibold ${trade.actual_pnl >= 0 ? 'text-profit' : 'text-loss'} mt-0.5">${formatCurrency(trade.actual_pnl)}</p></div>` : ''}
+    </div>` : ''}
+    ${(trade.confidence || trade.discipline || trade.emotion) ? `
+    <div class="bg-surface-900/50 rounded-xl p-3 mb-4">
+      <span class="text-xs text-slate-500 block mb-1">Psychology</span>
+      <div class="flex flex-wrap gap-4 text-sm text-slate-300">
+        ${trade.confidence ? `<span>Confidence: ${'★'.repeat(trade.confidence)}${'☆'.repeat(5 - trade.confidence)}</span>` : ''}
+        ${trade.discipline ? `<span>Discipline: ${'★'.repeat(trade.discipline)}${'☆'.repeat(5 - trade.discipline)}</span>` : ''}
+        ${trade.emotion ? `<span>Emotion: ${trade.emotion}</span>` : ''}
+      </div>
+    </div>` : ''}
+    ${trade.lesson ? `<div class="bg-surface-900/50 rounded-xl p-3 mb-4"><span class="text-xs text-slate-500 block mb-1">Lesson</span><p class="text-sm text-slate-300 whitespace-pre-wrap">${escapeHtml(trade.lesson)}</p></div>` : ''}
     ${trade.notes ? `<div class="bg-surface-900/50 rounded-xl p-3"><span class="text-xs text-slate-500 block mb-1">Notes</span><p class="text-sm text-slate-300 whitespace-pre-wrap">${escapeHtml(trade.notes)}</p></div>` : ''}
     <div class="flex gap-3 mt-6">
       <button onclick="editTrade('${trade.id}')" class="flex-1 px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition">Edit</button>

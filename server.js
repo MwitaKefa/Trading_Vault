@@ -84,6 +84,14 @@ async function initSchema() {
     ['risk_percentage', 'REAL'],
     ['risk_flag', 'TEXT'],
     ['created_at', "TEXT DEFAULT (datetime('now'))"],
+    ['planned_sl', 'REAL'],
+    ['planned_tp', 'REAL'],
+    ['actual_sl', 'REAL'],
+    ['actual_pnl', 'REAL'],
+    ['confidence', 'INTEGER'],
+    ['discipline', 'INTEGER'],
+    ['emotion', 'TEXT'],
+    ['lesson', 'TEXT'],
   ];
   for (const [col, type] of tradeAlters) {
     if (!tradeColumns.includes(col)) {
@@ -173,11 +181,15 @@ app.post('/api/trades', async (req, res) => {
     const { accountId, stopLossSize, riskPercentage, riskFlag } = await resolveTradeRisk(t);
     await runAsync(
       `INSERT OR REPLACE INTO trades
-       (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [t.id, t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0,
        t.entryDate, t.exitDate, JSON.stringify(t.tags || []), t.notes || '', t.screenshot || '',
-       t.pnl || 0, t.pnlPercent || 0, t.result || '', accountId, stopLossSize, riskPercentage, riskFlag]
+       t.pnl || 0, t.pnlPercent || 0, t.result || '', accountId, stopLossSize, riskPercentage, riskFlag,
+       t.planned_sl != null ? t.planned_sl : null, t.planned_tp != null ? t.planned_tp : null,
+       t.actual_sl != null ? t.actual_sl : null, t.actual_pnl != null ? t.actual_pnl : null,
+       t.confidence != null ? t.confidence : null, t.discipline != null ? t.discipline : null,
+       t.emotion || null, t.lesson || null]
     );
     res.json({ success: true, id: t.id, accountId, stopLossSize, riskPercentage, riskFlag });
   } catch (err) {
@@ -191,10 +203,14 @@ app.put('/api/trades/:id', async (req, res) => {
     const t = req.body;
     const { accountId, stopLossSize, riskPercentage, riskFlag } = await resolveTradeRisk(t);
     await runAsync(
-      `UPDATE trades SET symbol=?,side=?,entryPrice=?,exitPrice=?,quantity=?,fees=?,entryDate=?,exitDate=?,tags=?,notes=?,screenshot=?,pnl=?,pnlPercent=?,result=?,account_id=?,stop_loss_size=?,risk_percentage=?,risk_flag=? WHERE id=?`,
+      `UPDATE trades SET symbol=?,side=?,entryPrice=?,exitPrice=?,quantity=?,fees=?,entryDate=?,exitDate=?,tags=?,notes=?,screenshot=?,pnl=?,pnlPercent=?,result=?,account_id=?,stop_loss_size=?,risk_percentage=?,risk_flag=?,planned_sl=?,planned_tp=?,actual_sl=?,actual_pnl=?,confidence=?,discipline=?,emotion=?,lesson=? WHERE id=?`,
       [t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0, t.entryDate, t.exitDate,
        JSON.stringify(t.tags || []), t.notes || '', t.screenshot || '', t.pnl || 0, t.pnlPercent || 0, t.result || '',
-       accountId, stopLossSize, riskPercentage, riskFlag, id]
+       accountId, stopLossSize, riskPercentage, riskFlag,
+       t.planned_sl != null ? t.planned_sl : null, t.planned_tp != null ? t.planned_tp : null,
+       t.actual_sl != null ? t.actual_sl : null, t.actual_pnl != null ? t.actual_pnl : null,
+       t.confidence != null ? t.confidence : null, t.discipline != null ? t.discipline : null,
+       t.emotion || null, t.lesson || null, id]
     );
     res.json({ success: true, accountId, stopLossSize, riskPercentage, riskFlag });
   } catch (err) {

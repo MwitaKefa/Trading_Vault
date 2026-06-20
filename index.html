@@ -438,89 +438,189 @@
         <h3 id="modalTitle" class="text-lg font-bold text-white">New Trade</h3>
         <button onclick="closeTradeModal()" class="p-1.5 rounded-lg hover:bg-white/5 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
-      <form id="tradeForm" class="p-6 space-y-5" onsubmit="saveTrade(event)">
+      <form id="tradeForm" class="p-6 space-y-6" onsubmit="saveTrade(event)">
         <input type="hidden" id="tradeId">
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Account</label>
-            <select id="tradeAccount" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
-              <option value="">No Account</option>
-            </select>
+
+        <!-- TRADE DETAILS -->
+        <div class="space-y-4">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">📊 Trade Details</h4>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Account</label>
+              <select id="tradeAccount" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+                <option value="">No Account</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Symbol *</label>
+              <input id="tradeSymbol" type="text" placeholder="EURUSD" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition uppercase">
+            </div>
           </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Stop Loss Size ($)</label>
-            <input id="tradeStopLoss" type="number" step="any" placeholder="0.00" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
-          </div>
-        </div>
-        <div id="riskPreview" class="p-3 rounded-xl bg-surface-900/50 border border-white/5 hidden">
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-slate-500">Risk vs Running Balance</span>
-            <span id="riskPreviewValue" class="text-sm font-bold">—</span>
-          </div>
-          <p id="riskPreviewNote" class="text-[11px] text-slate-500 mt-1"></p>
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Symbol *</label>
-            <input id="tradeSymbol" type="text" placeholder="AAPL" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition uppercase">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Side *</label>
-            <select id="tradeSide" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
-              <option value="long">Long 📈</option>
-              <option value="short">Short 📉</option>
-            </select>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Side *</label>
+              <select id="tradeSide" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+                <option value="long">Long 📈</option>
+                <option value="short">Short 📉</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Lots *</label>
+              <input id="tradeQty" type="number" step="any" placeholder="0.00" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            </div>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Entry Price *</label>
-            <input id="tradeEntry" type="number" step="any" placeholder="0.00" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+
+        <!-- PLANNED -->
+        <div class="space-y-4 p-4 rounded-xl border border-white/5 bg-surface-900/30">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">🎯 Planned (Before Entry)</h4>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Entry Price *</label>
+              <input id="tradeEntry" type="number" step="any" placeholder="0.00" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Entry Date *</label>
+              <input id="tradeEntryDate" type="datetime-local" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Stop Loss (price)</label>
+              <input id="tradePlannedSL" type="number" step="any" placeholder="0.00" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+              <p id="plannedRiskNote" class="text-[11px] text-slate-500 mt-1"></p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Take Profit (price)</label>
+              <input id="tradePlannedTP" type="number" step="any" placeholder="0.00" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+              <p id="plannedRewardNote" class="text-[11px] text-slate-500 mt-1"></p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Plan Risk $</label>
+              <input id="tradeStopLoss" type="number" step="any" placeholder="0.00" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Plan R:R</label>
+              <div class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm flex items-center h-[42px]">
+                <span id="plannedRRValue" class="font-bold text-slate-300">—</span>
+              </div>
+            </div>
+          </div>
+          <div id="riskPreview" class="p-3 rounded-xl bg-surface-900/50 border border-white/5 hidden">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-slate-500">Risk vs Running Balance</span>
+              <span id="riskPreviewValue" class="text-sm font-bold">—</span>
+            </div>
+            <p id="riskPreviewNote" class="text-[11px] text-slate-500 mt-1"></p>
+          </div>
+        </div>
+
+        <!-- ACTUAL -->
+        <div class="space-y-4 p-4 rounded-xl border border-white/5 bg-surface-900/30">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">📈 Actual (After Closing)</h4>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Exit Price *</label>
+              <input id="tradeExit" type="number" step="any" placeholder="0.00" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Exit Date *</label>
+              <input id="tradeExitDate" type="datetime-local" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Actual Stop Loss <span class="text-slate-600 normal-case">(moved it?)</span></label>
+              <input id="tradeActualSL" type="number" step="any" placeholder="0.00" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Fees</label>
+              <input id="tradeFees" type="number" step="any" placeholder="0.00" value="0" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            </div>
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Exit Price *</label>
-            <input id="tradeExit" type="number" step="any" placeholder="0.00" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Actual P&L $ <span class="text-slate-600 normal-case">(from broker — overrides calculated)</span></label>
+            <input id="tradeActualPnl" type="number" step="any" placeholder="Leave blank to use calculated P&L" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            <p id="actualPnlNote" class="text-[11px] text-slate-500 mt-1"></p>
+          </div>
+          <div id="pnlPreview" class="p-4 rounded-xl bg-surface-900/50 border border-white/5 text-center hidden">
+            <span class="text-xs text-slate-500">Calculated P&L (Entry/Exit/Lots/Fees)</span>
+            <p id="pnlPreviewValue" class="text-2xl font-bold mt-1">$0.00</p>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+
+        <!-- PSYCHOLOGY -->
+        <div class="space-y-4 p-4 rounded-xl border border-white/5 bg-surface-900/30">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">🧠 Psychology (Self-Assessment)</h4>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Confidence (1-5)</label>
+              <div id="confidenceStars" class="flex items-center gap-1">
+                <button type="button" class="star-btn text-slate-700" data-val="1" onclick="setStarRating('confidence',1)">★</button>
+                <button type="button" class="star-btn text-slate-700" data-val="2" onclick="setStarRating('confidence',2)">★</button>
+                <button type="button" class="star-btn text-slate-700" data-val="3" onclick="setStarRating('confidence',3)">★</button>
+                <button type="button" class="star-btn text-slate-700" data-val="4" onclick="setStarRating('confidence',4)">★</button>
+                <button type="button" class="star-btn text-slate-700" data-val="5" onclick="setStarRating('confidence',5)">★</button>
+              </div>
+              <input type="hidden" id="tradeConfidence" value="0">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Emotion</label>
+              <select id="tradeEmotion" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+                <option value="">—</option>
+                <option value="Calm">Calm</option>
+                <option value="Confident">Confident</option>
+                <option value="Excited">Excited</option>
+                <option value="Neutral">Neutral</option>
+                <option value="Anxious">Anxious</option>
+                <option value="Fearful">Fearful</option>
+                <option value="Greedy">Greedy</option>
+                <option value="FOMO">FOMO</option>
+                <option value="Frustrated">Frustrated</option>
+                <option value="Revenge">Revenge</option>
+              </select>
+            </div>
+          </div>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Quantity *</label>
-            <input id="tradeQty" type="number" step="any" placeholder="0" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Discipline (1-5) <span class="text-slate-600 normal-case">(did you follow your plan?)</span></label>
+            <div id="disciplineStars" class="flex items-center gap-1">
+              <button type="button" class="star-btn text-slate-700" data-val="1" onclick="setStarRating('discipline',1)">★</button>
+              <button type="button" class="star-btn text-slate-700" data-val="2" onclick="setStarRating('discipline',2)">★</button>
+              <button type="button" class="star-btn text-slate-700" data-val="3" onclick="setStarRating('discipline',3)">★</button>
+              <button type="button" class="star-btn text-slate-700" data-val="4" onclick="setStarRating('discipline',4)">★</button>
+              <button type="button" class="star-btn text-slate-700" data-val="5" onclick="setStarRating('discipline',5)">★</button>
+            </div>
+            <input type="hidden" id="tradeDiscipline" value="0">
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Fees</label>
-            <input id="tradeFees" type="number" step="any" placeholder="0.00" value="0" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Lesson</label>
+            <input id="tradeLesson" type="text" placeholder="What did you learn from this trade?" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+
+        <!-- CONTEXT -->
+        <div class="space-y-4">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">🔍 Context</h4>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Entry Date *</label>
-            <input id="tradeEntryDate" type="datetime-local" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Strategy / Tags</label>
+            <div id="modalTagsContainer" class="flex flex-wrap gap-2 mb-2"></div>
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Exit Date *</label>
-            <input id="tradeExitDate" type="datetime-local" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Notes</label>
+            <textarea id="tradeNotes" rows="3" placeholder="Trade rationale, lessons learned..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition resize-none"></textarea>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Screenshot URL</label>
+            <input id="tradeScreenshot" type="url" placeholder="https://..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
           </div>
         </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1.5">Tags</label>
-          <div id="modalTagsContainer" class="flex flex-wrap gap-2 mb-2"></div>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1.5">Notes</label>
-          <textarea id="tradeNotes" rows="3" placeholder="Trade rationale, lessons learned..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition resize-none"></textarea>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1.5">Screenshot URL</label>
-          <input id="tradeScreenshot" type="url" placeholder="https://..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
-        </div>
-        <div id="pnlPreview" class="p-4 rounded-xl bg-surface-900/50 border border-white/5 text-center hidden">
-          <span class="text-xs text-slate-500">Estimated P&L</span>
-          <p id="pnlPreviewValue" class="text-2xl font-bold mt-1">$0.00</p>
-        </div>
+
         <div class="flex gap-3 pt-2">
           <button type="button" onclick="closeTradeModal()" class="flex-1 px-4 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-sm font-semibold text-white transition">Cancel</button>
-          <button type="submit" class="flex-1 px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition shadow-lg shadow-accent/25">Save Trade</button>
+          <button type="button" onclick="clearTradeForm()" class="px-4 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-sm font-semibold text-white transition">⏹️ Clear</button>
+          <button type="submit" class="flex-1 px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition shadow-lg shadow-accent/25">💾 Save Trade</button>
         </div>
       </form>
     </div>
