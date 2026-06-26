@@ -228,6 +228,12 @@
           <option value="loss">Losses</option>
           <option value="breakeven">Breakeven</option>
         </select>
+        <select id="filterSession" class="px-4 py-2.5 bg-surface-800/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition" onchange="renderJournal()">
+          <option value="all">All Sessions</option>
+          <option value="Asia">Asia</option>
+          <option value="London">London</option>
+          <option value="New York">New York</option>
+        </select>
         <select id="filterTag" class="px-4 py-2.5 bg-surface-800/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition" onchange="renderJournal()">
           <option value="all">All Tags</option>
         </select>
@@ -264,6 +270,10 @@
       <div id="sessionStats" class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6 mb-6">
         <h3 class="text-sm font-semibold text-white mb-4">Session Stats</h3>
         <div id="sessionStatsContent" class="flex gap-4"></div>
+      </div>
+      <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6 mb-6">
+        <h3 class="text-sm font-semibold text-white mb-4">Strategy Edge</h3>
+        <div id="strategyStatsContent" class="space-y-2"></div>
       </div>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
@@ -390,6 +400,12 @@
           <h3 class="text-sm font-semibold text-white mb-4">Data Management</h3>
           <div class="space-y-4">
             <div>
+              <label class="block text-xs text-slate-500 mb-2">Full Backup (JSON)</label>
+              <button onclick="exportFullBackup()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 rounded-xl text-sm font-semibold text-white transition">
+                <i data-lucide="archive" class="w-4 h-4 inline mr-2"></i>Export Full Backup
+              </button>
+            </div>
+            <div>
               <label class="block text-xs text-slate-500 mb-2">Export Trades (JSON)</label>
               <button onclick="exportData()" class="px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition">
                 <i data-lucide="download" class="w-4 h-4 inline mr-2"></i>Export
@@ -412,6 +428,35 @@
               </button>
             </div>
           </div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Risk Rules</h3>
+          <form id="riskSettingsForm" class="space-y-4" onsubmit="saveRiskSettings(event)">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">Minimum Risk %</label>
+                <input id="riskMinPct" type="number" min="0" step="0.01" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">Maximum Risk %</label>
+                <input id="riskMaxPct" type="number" min="0" step="0.01" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">Drawdown Target %</label>
+                <input id="riskDrawdownPct" type="number" min="0" step="0.01" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">Growth Target %</label>
+                <input id="riskGrowthPct" type="number" min="0" step="0.01" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="submit" class="px-4 py-2.5 bg-accent hover:bg-accent-dark rounded-xl text-sm font-semibold text-white transition">
+                <i data-lucide="save" class="w-4 h-4 inline mr-2"></i>Save Risk Rules
+              </button>
+              <span id="riskSettingsStatus" class="text-xs text-slate-500"></span>
+            </div>
+          </form>
         </div>
         <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
           <h3 class="text-sm font-semibold text-white mb-4">Custom Tags</h3>
@@ -446,14 +491,30 @@
           <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">📊 Trade Details</h4>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1.5">Account</label>
-              <select id="tradeAccount" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
-                <option value="">No Account</option>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Account *</label>
+              <select id="tradeAccount" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+                <option value="">Select Account</option>
               </select>
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1.5">Symbol *</label>
               <input id="tradeSymbol" type="text" placeholder="EURUSD" required class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition uppercase">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Strategy / Setup</label>
+              <input id="tradeStrategy" list="strategyOptions" type="text" placeholder="Breakout, reversal..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+              <datalist id="strategyOptions"></datalist>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Session</label>
+              <select id="tradeSession" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+                <option value="">Select session</option>
+                <option value="Asia">Asia</option>
+                <option value="London">London</option>
+                <option value="New York">New York</option>
+              </select>
             </div>
           </div>
           <div class="grid grid-cols-2 gap-4">
@@ -548,6 +609,7 @@
           <div id="pnlPreview" class="p-4 rounded-xl bg-surface-900/50 border border-white/5 text-center hidden">
             <span class="text-xs text-slate-500">Calculated P&L (Entry/Exit/Lots/Fees)</span>
             <p id="pnlPreviewValue" class="text-2xl font-bold mt-1">$0.00</p>
+            <p id="rMultiplePreviewValue" class="text-xs font-semibold text-slate-400 mt-1">R: --</p>
           </div>
         </div>
 
@@ -604,7 +666,7 @@
         <div class="space-y-4">
           <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">🔍 Context</h4>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Strategy / Tags</label>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Setup Tag</label>
             <div id="modalTagsContainer" class="flex flex-wrap gap-2 mb-2"></div>
           </div>
           <div>
@@ -613,7 +675,12 @@
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-400 mb-1.5">Screenshot URL</label>
-            <input id="tradeScreenshot" type="url" placeholder="https://..." class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            <input id="tradeScreenshot" type="text" placeholder="https://... or uploaded image" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Upload Screenshot</label>
+            <input id="tradeScreenshotFile" type="file" accept="image/*" class="w-full text-sm text-slate-400 file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-white/5 file:text-slate-200 hover:file:bg-white/10">
+            <img id="tradeScreenshotPreview" alt="Screenshot preview" class="hidden mt-3 w-full max-h-48 object-cover rounded-xl border border-white/5">
           </div>
         </div>
 

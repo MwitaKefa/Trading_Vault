@@ -58,6 +58,11 @@ async function initSchema() {
     name TEXT PRIMARY KEY
   )`);
 
+  await runAsync(`CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`);
+
   await runAsync(`CREATE TABLE IF NOT EXISTS accounts (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
@@ -92,6 +97,9 @@ async function initSchema() {
     ['discipline', 'INTEGER'],
     ['emotion', 'TEXT'],
     ['lesson', 'TEXT'],
+    ['strategy', 'TEXT'],
+    ['session', 'TEXT'],
+    ['r_multiple', 'REAL'],
   ];
   for (const [col, type] of tradeAlters) {
     if (!tradeColumns.includes(col)) {
@@ -141,15 +149,66 @@ async function getRunningBalance(accountId) {
 }
 
 // Risk classification from a stop-loss size against the running balance.
-function computeRisk(runningBalance, stopLossSize) {
+const DEFAULT_RISK_SETTINGS = {
+  minRiskPct: 0.2,
+  maxRiskPct: 1.0,
+  drawdownSizeDownPct: 0.5,
+  growthSizeUpPct: 0.8,
+};
+
+async function getRiskSettings() {
+  const row = await getAsync('SELECT value FROM settings WHERE key = ?', ['risk']);
+  if (!row) return { ...DEFAULT_RISK_SETTINGS };
+  try {
+    return { ...DEFAULT_RISK_SETTINGS, ...JSON.parse(row.value) };
+  } catch {
+    return { ...DEFAULT_RISK_SETTINGS };
+  }
+}
+
+function normalizeRiskSettings(raw = {}) {
+  const out = { ...DEFAULT_RISK_SETTINGS };
+  Object.keys(out).forEach(key => {
+    const value = Number(raw[key]);
+    if (!Number.isNaN(value) && value >= 0) out[key] = value;
+  });
+  if (out.minRiskPct > out.maxRiskPct) {
+    [out.minRiskPct, out.maxRiskPct] = [out.maxRiskPct, out.minRiskPct];
+  }
+  return out;
+}
+
+function computeRisk(runningBalance, stopLossSize, settings = DEFAULT_RISK_SETTINGS) {
   if (!stopLossSize || !runningBalance || runningBalance <= 0) {
     return { riskPercentage: null, riskFlag: null };
   }
   const riskPercentage = (stopLossSize / runningBalance) * 100;
   let riskFlag = 'ok';
-  if (riskPercentage > 1.0) riskFlag = 'violation';
-  else if (riskPercentage < 0.2) riskFlag = 'conservative';
+  if (riskPercentage > settings.maxRiskPct) riskFlag = 'violation';
+  else if (riskPercentage < settings.minRiskPct) riskFlag = 'conservative';
   return { riskPercentage: Math.round(riskPercentage * 10000) / 10000, riskFlag };
+}
+
+function normalizeSession(session) {
+  if (!session) return '';
+  const value = String(session).trim().toLowerCase();
+  if (value === 'newyork' || value === 'new york' || value === 'ny') return 'New York';
+  if (value === 'asia') return 'Asia';
+  if (value === 'london') return 'London';
+  return '';
+}
+
+function inferSessionFromDate(dateValue) {
+  if (!dateValue) return '';
+  const hour = new Date(dateValue).getHours();
+  if (Number.isNaN(hour)) return '';
+  if (hour >= 0 && hour < 8) return 'Asia';
+  if (hour >= 8 && hour < 16) return 'London';
+  return 'New York';
+}
+
+function getTradeSession(t) {
+  return normalizeSession(t.session) || inferSessionFromDate(t.entryDate || t.exitDate);
 }
 
 // API: trades
@@ -170,30 +229,47 @@ async function resolveTradeRisk(t) {
   let riskFlag = null;
   if (accountId && sls != null && !Number.isNaN(sls)) {
     const runningBalance = await getRunningBalance(accountId);
-    ({ riskPercentage, riskFlag } = computeRisk(runningBalance, sls));
+    const settings = await getRiskSettings();
+    ({ riskPercentage, riskFlag } = computeRisk(runningBalance, sls, settings));
   }
   return { accountId, stopLossSize: sls, riskPercentage, riskFlag };
+}
+
+async function requireTradeAccount(accountId) {
+  if (!accountId) {
+    const err = new Error('Account is required for every trade');
+    err.statusCode = 400;
+    throw err;
+  }
+  const account = await getAsync('SELECT id FROM accounts WHERE id = ?', [accountId]);
+  if (!account) {
+    const err = new Error('Trade account does not exist');
+    err.statusCode = 400;
+    throw err;
+  }
 }
 
 app.post('/api/trades', async (req, res) => {
   try {
     const t = req.body;
     const { accountId, stopLossSize, riskPercentage, riskFlag } = await resolveTradeRisk(t);
+    await requireTradeAccount(accountId);
     await runAsync(
       `INSERT OR REPLACE INTO trades
-       (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson,strategy,session,r_multiple)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [t.id, t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0,
        t.entryDate, t.exitDate, JSON.stringify(t.tags || []), t.notes || '', t.screenshot || '',
        t.pnl || 0, t.pnlPercent || 0, t.result || '', accountId, stopLossSize, riskPercentage, riskFlag,
        t.planned_sl != null ? t.planned_sl : null, t.planned_tp != null ? t.planned_tp : null,
        t.actual_sl != null ? t.actual_sl : null, t.actual_pnl != null ? t.actual_pnl : null,
        t.confidence != null ? t.confidence : null, t.discipline != null ? t.discipline : null,
-       t.emotion || null, t.lesson || null]
+       t.emotion || null, t.lesson || null, t.strategy || null, t.session || null,
+       t.r_multiple != null ? t.r_multiple : null]
     );
     res.json({ success: true, id: t.id, accountId, stopLossSize, riskPercentage, riskFlag });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -202,19 +278,21 @@ app.put('/api/trades/:id', async (req, res) => {
     const id = req.params.id;
     const t = req.body;
     const { accountId, stopLossSize, riskPercentage, riskFlag } = await resolveTradeRisk(t);
+    await requireTradeAccount(accountId);
     await runAsync(
-      `UPDATE trades SET symbol=?,side=?,entryPrice=?,exitPrice=?,quantity=?,fees=?,entryDate=?,exitDate=?,tags=?,notes=?,screenshot=?,pnl=?,pnlPercent=?,result=?,account_id=?,stop_loss_size=?,risk_percentage=?,risk_flag=?,planned_sl=?,planned_tp=?,actual_sl=?,actual_pnl=?,confidence=?,discipline=?,emotion=?,lesson=? WHERE id=?`,
+      `UPDATE trades SET symbol=?,side=?,entryPrice=?,exitPrice=?,quantity=?,fees=?,entryDate=?,exitDate=?,tags=?,notes=?,screenshot=?,pnl=?,pnlPercent=?,result=?,account_id=?,stop_loss_size=?,risk_percentage=?,risk_flag=?,planned_sl=?,planned_tp=?,actual_sl=?,actual_pnl=?,confidence=?,discipline=?,emotion=?,lesson=?,strategy=?,session=?,r_multiple=? WHERE id=?`,
       [t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0, t.entryDate, t.exitDate,
        JSON.stringify(t.tags || []), t.notes || '', t.screenshot || '', t.pnl || 0, t.pnlPercent || 0, t.result || '',
        accountId, stopLossSize, riskPercentage, riskFlag,
        t.planned_sl != null ? t.planned_sl : null, t.planned_tp != null ? t.planned_tp : null,
        t.actual_sl != null ? t.actual_sl : null, t.actual_pnl != null ? t.actual_pnl : null,
        t.confidence != null ? t.confidence : null, t.discipline != null ? t.discipline : null,
-       t.emotion || null, t.lesson || null, id]
+       t.emotion || null, t.lesson || null, t.strategy || null, t.session || null,
+       t.r_multiple != null ? t.r_multiple : null, id]
     );
     res.json({ success: true, accountId, stopLossSize, riskPercentage, riskFlag });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -237,15 +315,87 @@ app.delete('/api/trades/:id', (req, res) => {
 app.post('/api/trades/bulk', (req, res) => {
   const trades = req.body;
   if (!Array.isArray(trades)) return res.status(400).json({ error: 'Expected array' });
-  const insert = db.prepare(`INSERT OR REPLACE INTO trades (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insert = db.prepare(`INSERT OR REPLACE INTO trades (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson,strategy,session,r_multiple) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
-    trades.forEach(t => insert.run(t.id, t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0, t.entryDate, t.exitDate, JSON.stringify(t.tags || []), t.notes || '', t.screenshot || '', t.pnl || 0, t.pnlPercent || 0, t.result || ''));
+    trades.forEach(t => insert.run(
+      t.id, t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0,
+      t.entryDate, t.exitDate, JSON.stringify(t.tags || []), t.notes || '',
+      t.screenshot || '', t.pnl || 0, t.pnlPercent || 0, t.result || '',
+      t.account_id || t.accountId || null,
+      t.stop_loss_size != null ? t.stop_loss_size : null,
+      t.risk_percentage != null ? t.risk_percentage : null,
+      t.risk_flag || null,
+      t.planned_sl != null ? t.planned_sl : null,
+      t.planned_tp != null ? t.planned_tp : null,
+      t.actual_sl != null ? t.actual_sl : null,
+      t.actual_pnl != null ? t.actual_pnl : null,
+      t.confidence != null ? t.confidence : null,
+      t.discipline != null ? t.discipline : null,
+      t.emotion || null,
+      t.lesson || null,
+      t.strategy || null,
+      t.session || null,
+      t.r_multiple != null ? t.r_multiple : null
+    ));
     db.run('COMMIT', err => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true, imported: trades.length });
     });
   });
+});
+
+app.get('/api/backup', async (req, res) => {
+  try {
+    const [trades, tags, accounts, balanceSnapshots, settingsRows] = await Promise.all([
+      allAsync('SELECT * FROM trades ORDER BY exitDate DESC'),
+      allAsync('SELECT * FROM tags ORDER BY name'),
+      allAsync('SELECT * FROM accounts ORDER BY created_at ASC'),
+      allAsync('SELECT * FROM balance_snapshots ORDER BY effective_date DESC, created_at DESC'),
+      allAsync('SELECT * FROM settings ORDER BY key'),
+    ]);
+    res.json({
+      app: 'TradeVault',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      trades: trades.map(t => ({ ...t, tags: parseTags(t.tags) })),
+      tags: tags.map(t => t.name),
+      accounts,
+      balanceSnapshots,
+      settings: settingsRows.reduce((acc, row) => {
+        try {
+          acc[row.key] = JSON.parse(row.value);
+        } catch {
+          acc[row.key] = row.value;
+        }
+        return acc;
+      }, {}),
+    });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+// Settings
+app.get('/api/settings/risk', async (req, res) => {
+  try {
+    res.json(await getRiskSettings());
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+app.put('/api/settings/risk', async (req, res) => {
+  try {
+    const settings = normalizeRiskSettings(req.body || {});
+    await runAsync(
+      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+      ['risk', JSON.stringify(settings)]
+    );
+    res.json(settings);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
 });
 
 // Tags
@@ -321,19 +471,13 @@ app.get('/api/stats/weekly', (req, res) => {
   });
 });
 
-// Stats: sessions (pre-market, market, post-market) winrate and counts
+// Stats: trading sessions (Asia, London, New York) winrate and counts.
 app.get('/api/stats/sessions', (req, res) => {
-  db.all('SELECT pnl, entryDate, exitDate FROM trades', (err, rows) => {
+  db.all('SELECT pnl, entryDate, exitDate, session FROM trades', (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    const sessions = { premarket: { count: 0, wins: 0 }, market: { count: 0, wins: 0 }, postmarket: { count: 0, wins: 0 } };
+    const sessions = { Asia: { count: 0, wins: 0 }, London: { count: 0, wins: 0 }, 'New York': { count: 0, wins: 0 } };
     rows.forEach(r => {
-      const d = new Date(r.entryDate || r.exitDate);
-      const hour = d.getHours();
-      let key = 'market';
-      // Define sessions (local time): premarket <9:30, market 9:30-16:00, postmarket >16:00
-      const minutes = d.getHours() * 60 + d.getMinutes();
-      if (minutes < 9 * 60 + 30) key = 'premarket';
-      else if (minutes >= 16 * 60) key = 'postmarket';
+      const key = getTradeSession(r) || 'London';
       sessions[key].count += 1;
       if ((r.pnl || 0) > 0) sessions[key].wins += 1;
     });
@@ -384,7 +528,7 @@ app.post('/api/accounts', async (req, res) => {
     const acc = await getAsync('SELECT * FROM accounts WHERE id = ?', [id]);
     res.json(await buildAccountSummary(acc));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -440,12 +584,15 @@ app.put('/api/accounts/:id', async (req, res) => {
   }
 });
 
-// Delete account and its snapshots; detach its trades (account_id -> NULL).
+// Delete account only when no trades depend on it.
 app.delete('/api/accounts/:id', async (req, res) => {
   try {
     const id = req.params.id;
+    const usage = await getAsync('SELECT COUNT(*) AS count FROM trades WHERE account_id = ?', [id]);
+    if (usage && usage.count > 0) {
+      return res.status(400).json({ error: 'Cannot delete an account that has trades' });
+    }
     await runAsync('DELETE FROM balance_snapshots WHERE account_id = ?', [id]);
-    await runAsync('UPDATE trades SET account_id = NULL WHERE account_id = ?', [id]);
     const r = await runAsync('DELETE FROM accounts WHERE id = ?', [id]);
     res.json({ success: true, deleted: r.changes });
   } catch (err) {

@@ -1,11 +1,21 @@
 // ============ DATA LAYER ============
 const STORAGE_KEY = 'tradevault_trades';
 const TAGS_KEY = 'tradevault_tags';
+const RISK_SETTINGS_KEY = 'tradevault_risk_settings';
 
-const DEFAULT_TAGS = ['Scalp', 'Swing', 'Day Trade', 'Breakout', 'Reversal', 'Trend Follow', 'News', 'Earnings', 'Community Trade', 'Liquidity Sweep'];
+const DEFAULT_TAGS = ['Liquidity Sweep', 'Community Idea', 'News'];
+const TRADE_ENTRY_TAGS = ['Liquidity Sweep', 'Community Idea', 'News'];
+const TRADE_SESSIONS = ['Asia', 'London', 'New York'];
+const DEFAULT_RISK_SETTINGS = {
+  minRiskPct: 0.2,
+  maxRiskPct: 1.0,
+  drawdownSizeDownPct: 0.5,
+  growthSizeUpPct: 0.8,
+};
 
 let cachedTrades = [];
 let cachedTags = [...DEFAULT_TAGS];
+let riskSettings = getRiskSettingsFromLocal();
 
 function getTradesFromLocal() {
   try {
@@ -30,6 +40,31 @@ function getTagsFromLocal() {
 
 function saveTagsToLocal(tags) {
   localStorage.setItem(TAGS_KEY, JSON.stringify(tags));
+}
+
+function normalizeRiskSettings(raw = {}) {
+  const settings = { ...DEFAULT_RISK_SETTINGS };
+  Object.keys(settings).forEach(key => {
+    const value = Number(raw[key]);
+    if (!Number.isNaN(value) && value >= 0) settings[key] = value;
+  });
+  if (settings.minRiskPct > settings.maxRiskPct) {
+    [settings.minRiskPct, settings.maxRiskPct] = [settings.maxRiskPct, settings.minRiskPct];
+  }
+  return settings;
+}
+
+function getRiskSettingsFromLocal() {
+  try {
+    return normalizeRiskSettings(JSON.parse(localStorage.getItem(RISK_SETTINGS_KEY)) || {});
+  } catch {
+    return { ...DEFAULT_RISK_SETTINGS };
+  }
+}
+
+function saveRiskSettingsToLocal(settings) {
+  riskSettings = normalizeRiskSettings(settings);
+  localStorage.setItem(RISK_SETTINGS_KEY, JSON.stringify(riskSettings));
 }
 
 function getTrades() {
@@ -86,9 +121,21 @@ async function fetchTagsFromServer() {
   return tags;
 }
 
+async function fetchRiskSettingsFromServer() {
+  const res = await fetch('/api/settings/risk');
+  if (!res.ok) throw new Error('Unable to fetch risk settings');
+  const settings = await res.json();
+  saveRiskSettingsToLocal(settings);
+  return riskSettings;
+}
+
 async function syncFromServer() {
   try {
-    const [trades, tags] = await Promise.all([fetchTradesFromServer(), fetchTagsFromServer()]);
+    const [trades, tags] = await Promise.all([
+      fetchTradesFromServer(),
+      fetchTagsFromServer(),
+      fetchRiskSettingsFromServer(),
+    ]);
     await fetchAccounts();
     populateAccountSelectors();
     return trades && tags;
@@ -164,6 +211,15 @@ function getAccountIdOf(trade) {
   return trade.account_id || trade.accountId || '';
 }
 
+function getAccountNameById(accountId) {
+  const account = cachedAccounts.find(a => a.id === accountId);
+  return account ? account.name : 'Unassigned';
+}
+
+function getAccountNameOf(trade) {
+  return getAccountNameById(getAccountIdOf(trade));
+}
+
 // Trades filtered by the currently selected account (all trades when none selected).
 function getScopedTrades() {
   const all = getTrades();
@@ -188,7 +244,7 @@ function populateAccountSelectors() {
   const tradeSel = document.getElementById('tradeAccount');
   if (tradeSel) {
     const cur = tradeSel.value;
-    tradeSel.innerHTML = accountOptionsHTML(false, true);
+    tradeSel.innerHTML = '<option value="">Select Account</option>' + accountOptionsHTML(false, false);
     tradeSel.value = cur;
   }
 }
@@ -308,9 +364,10 @@ async function saveAccountEdit(e) {
 }
 
 async function deleteAccount(id) {
-  if (!confirm('Delete this account? Its balance snapshots will be removed and its trades will be detached.')) return;
+  if (!confirm('Delete this account? This only works when the account has no trades.')) return;
   try {
-    await fetch(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('delete failed');
     if (currentAccountId === id) {
       currentAccountId = '';
       localStorage.setItem(ACCOUNT_KEY, '');
@@ -389,6 +446,72 @@ function toggleSidebar() {
 // ============ TRADE MODAL ============
 let selectedModalTags = [];
 
+function getStrategies() {
+  return [...new Set(getTrades().map(t => (t.strategy || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeSession(session) {
+  if (!session) return '';
+  const value = String(session).trim().toLowerCase();
+  if (value === 'newyork' || value === 'new york' || value === 'ny') return 'New York';
+  return TRADE_SESSIONS.find(s => s.toLowerCase() === value) || '';
+}
+
+function inferSessionFromDate(dateValue) {
+  if (!dateValue) return '';
+  const hour = new Date(dateValue).getHours();
+  if (Number.isNaN(hour)) return '';
+  if (hour >= 0 && hour < 8) return 'Asia';
+  if (hour >= 8 && hour < 16) return 'London';
+  return 'New York';
+}
+
+function getTradeSession(trade) {
+  return normalizeSession(trade.session) || inferSessionFromDate(trade.entryDate);
+}
+
+function updateStrategyOptions() {
+  const list = document.getElementById('strategyOptions');
+  if (!list) return;
+  list.innerHTML = getStrategies().map(s => `<option value="${escapeHtml(s)}"></option>`).join('');
+}
+
+function updateScreenshotPreview() {
+  const input = document.getElementById('tradeScreenshot');
+  const preview = document.getElementById('tradeScreenshotPreview');
+  if (!input || !preview) return;
+  const src = input.value.trim();
+  if (!src) {
+    preview.classList.add('hidden');
+    preview.removeAttribute('src');
+    return;
+  }
+  preview.src = src;
+  preview.classList.remove('hidden');
+}
+
+function handleScreenshotFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    showToast('Please choose an image file');
+    event.target.value = '';
+    return;
+  }
+  if (file.size > 800 * 1024) {
+    showToast('Image is too large. Use an image under 800 KB.');
+    event.target.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById('tradeScreenshot').value = reader.result;
+    updateScreenshotPreview();
+  };
+  reader.readAsDataURL(file);
+}
+
 function openTradeModal(tradeId = null) {
   const modal = document.getElementById('tradeModal');
   modal.classList.remove('hidden');
@@ -398,6 +521,7 @@ function openTradeModal(tradeId = null) {
   // Build tags
   renderModalTags();
   populateAccountSelectors();
+  updateStrategyOptions();
 
   if (tradeId) {
     const trades = getTrades();
@@ -407,6 +531,8 @@ function openTradeModal(tradeId = null) {
       document.getElementById('tradeAccount').value = getAccountIdOf(trade);
       document.getElementById('tradeStopLoss').value = (trade.stop_loss_size != null ? trade.stop_loss_size : '');
       document.getElementById('tradeSymbol').value = trade.symbol;
+      document.getElementById('tradeStrategy').value = trade.strategy || '';
+      document.getElementById('tradeSession').value = getTradeSession(trade);
       document.getElementById('tradeSide').value = trade.side;
       document.getElementById('tradeEntry').value = trade.entryPrice;
       document.getElementById('tradeExit').value = trade.exitPrice;
@@ -416,6 +542,7 @@ function openTradeModal(tradeId = null) {
       document.getElementById('tradeExitDate').value = trade.exitDate;
       document.getElementById('tradeNotes').value = trade.notes || '';
       document.getElementById('tradeScreenshot').value = trade.screenshot || '';
+      document.getElementById('tradeScreenshotFile').value = '';
       document.getElementById('tradePlannedSL').value = (trade.planned_sl != null ? trade.planned_sl : '');
       document.getElementById('tradePlannedTP').value = (trade.planned_tp != null ? trade.planned_tp : '');
       document.getElementById('tradeActualSL').value = (trade.actual_sl != null ? trade.actual_sl : '');
@@ -432,13 +559,17 @@ function openTradeModal(tradeId = null) {
     document.getElementById('tradeId').value = '';
     document.getElementById('tradeFees').value = 0;
     document.getElementById('tradeStopLoss').value = '';
+    document.getElementById('tradeStrategy').value = '';
+    document.getElementById('tradeSession').value = '';
     document.getElementById('tradePlannedSL').value = '';
     document.getElementById('tradePlannedTP').value = '';
     document.getElementById('tradeActualSL').value = '';
     document.getElementById('tradeActualPnl').value = '';
     document.getElementById('tradeEmotion').value = '';
     document.getElementById('tradeLesson').value = '';
-    document.getElementById('tradeAccount').value = currentAccountId || '';
+    document.getElementById('tradeScreenshot').value = '';
+    document.getElementById('tradeScreenshotFile').value = '';
+    document.getElementById('tradeAccount').value = currentAccountId || (cachedAccounts[0] ? cachedAccounts[0].id : '');
     applyStarRating('confidence', 0);
     applyStarRating('discipline', 0);
     // Set default dates to now
@@ -452,6 +583,7 @@ function openTradeModal(tradeId = null) {
   updateRiskPreview();
   updatePlannedRR();
   updateActualPnlNote();
+  updateScreenshotPreview();
   lucide.createIcons();
 }
 
@@ -460,12 +592,16 @@ function clearTradeForm() {
   document.getElementById('tradeForm').reset();
   document.getElementById('tradeFees').value = 0;
   document.getElementById('tradeStopLoss').value = '';
+  document.getElementById('tradeStrategy').value = '';
+  document.getElementById('tradeSession').value = '';
   document.getElementById('tradePlannedSL').value = '';
   document.getElementById('tradePlannedTP').value = '';
   document.getElementById('tradeActualSL').value = '';
   document.getElementById('tradeActualPnl').value = '';
   document.getElementById('tradeEmotion').value = '';
   document.getElementById('tradeLesson').value = '';
+  document.getElementById('tradeScreenshot').value = '';
+  document.getElementById('tradeScreenshotFile').value = '';
   selectedModalTags = [];
   renderModalTags();
   applyStarRating('confidence', 0);
@@ -479,6 +615,7 @@ function clearTradeForm() {
   updateRiskPreview();
   updatePlannedRR();
   updateActualPnlNote();
+  updateScreenshotPreview();
   showToast('Form cleared');
 }
 
@@ -564,6 +701,28 @@ function updateActualPnlNote() {
     : 'Calculated P&L (below) will be saved if left blank.';
 }
 
+function getRiskClassification(riskPct) {
+  if (riskPct > riskSettings.maxRiskPct) {
+    return {
+      flag: 'violation',
+      color: 'text-loss',
+      label: `VIOLATION - exceeds ${riskSettings.maxRiskPct}% max risk`,
+    };
+  }
+  if (riskPct < riskSettings.minRiskPct) {
+    return {
+      flag: 'conservative',
+      color: 'text-amber-400',
+      label: `TOO CONSERVATIVE - below ${riskSettings.minRiskPct}%`,
+    };
+  }
+  return {
+    flag: 'ok',
+    color: 'text-profit',
+    label: `OK - within ${riskSettings.minRiskPct}% to ${riskSettings.maxRiskPct}%`,
+  };
+}
+
 // Live risk preview against the selected account's running balance.
 function updateRiskPreview() {
   const accId = document.getElementById('tradeAccount').value;
@@ -579,13 +738,10 @@ function updateRiskPreview() {
   }
   const risk = (sls / acc.currentBalance) * 100;
   box.classList.remove('hidden');
-  let color, label;
-  if (risk > 1.0) { color = 'text-loss'; label = 'VIOLATION — exceeds 1.0% max risk'; }
-  else if (risk < 0.2) { color = 'text-amber-400'; label = 'TOO CONSERVATIVE — below 0.2%'; }
-  else { color = 'text-profit'; label = 'OK — within 0.2%–1.0%'; }
-  val.className = 'text-sm font-bold ' + color;
+  const classification = getRiskClassification(risk);
+  val.className = 'text-sm font-bold ' + classification.color;
   val.textContent = risk.toFixed(2) + '%';
-  note.textContent = `${label} · Running balance $${acc.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  note.textContent = `${classification.label} | Running balance $${acc.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function closeTradeModal() {
@@ -594,7 +750,7 @@ function closeTradeModal() {
 
 function renderModalTags() {
   const container = document.getElementById('modalTagsContainer');
-  const tags = getTags();
+  const tags = TRADE_ENTRY_TAGS;
   container.innerHTML = tags.map(tag => {
     const isSelected = selectedModalTags.includes(tag);
     return `<button type="button" class="tag-pill px-3 py-1 rounded-full text-xs font-medium ${isSelected ? 'bg-accent/20 text-accent-light border border-accent/30 selected' : 'bg-white/5 text-slate-400 border border-white/5'}" onclick="toggleModalTag('${tag}')">${tag}</button>`;
@@ -603,9 +759,9 @@ function renderModalTags() {
 
 function toggleModalTag(tag) {
   if (selectedModalTags.includes(tag)) {
-    selectedModalTags = selectedModalTags.filter(t => t !== tag);
+    selectedModalTags = [];
   } else {
-    selectedModalTags.push(tag);
+    selectedModalTags = [tag];
   }
   renderModalTags();
 }
@@ -616,23 +772,41 @@ function updatePnlPreview() {
   const qty = parseFloat(document.getElementById('tradeQty').value) || 0;
   const fees = parseFloat(document.getElementById('tradeFees').value) || 0;
   const side = document.getElementById('tradeSide').value;
+  const riskSize = parseFloat(document.getElementById('tradeStopLoss').value);
+  const actualPnlRaw = document.getElementById('tradeActualPnl').value;
+  const actualPnl = actualPnlRaw === '' ? null : parseFloat(actualPnlRaw);
 
   if (entry && exit && qty) {
     let pnl = side === 'long' ? (exit - entry) * qty - fees : (entry - exit) * qty - fees;
+    const finalPnl = actualPnl != null && !isNaN(actualPnl) ? actualPnl : pnl;
     const preview = document.getElementById('pnlPreview');
     const value = document.getElementById('pnlPreviewValue');
+    const rValue = document.getElementById('rMultiplePreviewValue');
     preview.classList.remove('hidden');
-    value.textContent = formatCurrency(pnl);
-    value.className = `text-2xl font-bold mt-1 ${pnl >= 0 ? 'text-profit' : 'text-loss'}`;
+    value.textContent = formatCurrency(finalPnl);
+    value.className = `text-2xl font-bold mt-1 ${finalPnl >= 0 ? 'text-profit' : 'text-loss'}`;
+    if (rValue) {
+      if (!isNaN(riskSize) && riskSize > 0) {
+        const r = finalPnl / riskSize;
+        rValue.textContent = `R: ${r >= 0 ? '+' : ''}${r.toFixed(2)}R`;
+        rValue.className = `text-xs font-semibold mt-1 ${r >= 0 ? 'text-profit' : 'text-loss'}`;
+      } else {
+        rValue.textContent = 'R: add Plan Risk $';
+        rValue.className = 'text-xs font-semibold text-slate-400 mt-1';
+      }
+    }
   } else {
     document.getElementById('pnlPreview').classList.add('hidden');
   }
 }
 
 // Listen for PnL preview updates
-['tradeEntry', 'tradeExit', 'tradeQty', 'tradeFees', 'tradeSide'].forEach(id => {
+['tradeEntry', 'tradeExit', 'tradeQty', 'tradeFees', 'tradeSide', 'tradeStopLoss', 'tradeActualPnl'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', updatePnlPreview);
 });
+
+document.getElementById('tradeScreenshot')?.addEventListener('input', updateScreenshotPreview);
+document.getElementById('tradeScreenshotFile')?.addEventListener('change', handleScreenshotFile);
 
 // Listen for risk preview updates
 ['tradeStopLoss', 'tradeAccount'].forEach(id => {
@@ -668,15 +842,28 @@ async function saveTrade(e) {
 
   // Account + risk fields
   const accountId = document.getElementById('tradeAccount').value || null;
+  if (!accountId) {
+    showToast('Choose an account before saving the trade');
+    document.getElementById('tradeAccount').focus();
+    return;
+  }
+  if (!cachedAccounts.some(a => a.id === accountId)) {
+    showToast('Choose a valid account before saving');
+    document.getElementById('tradeAccount').focus();
+    return;
+  }
   const slsRaw = parseFloat(document.getElementById('tradeStopLoss').value);
   const stopLossSize = isNaN(slsRaw) ? null : slsRaw;
+  const rMultiple = stopLossSize && stopLossSize > 0
+    ? Math.round((finalPnl / stopLossSize) * 100) / 100
+    : null;
   let riskPercentage = null;
   let riskFlag = null;
   if (accountId && stopLossSize != null) {
     const acc = cachedAccounts.find(a => a.id === accountId);
     if (acc && acc.currentBalance) {
       riskPercentage = Math.round((stopLossSize / acc.currentBalance) * 100 * 10000) / 10000;
-      riskFlag = riskPercentage > 1.0 ? 'violation' : riskPercentage < 0.2 ? 'conservative' : 'ok';
+      riskFlag = getRiskClassification(riskPercentage).flag;
     }
   }
 
@@ -694,6 +881,8 @@ async function saveTrade(e) {
   const trade = {
     id,
     symbol: document.getElementById('tradeSymbol').value.toUpperCase(),
+    strategy: document.getElementById('tradeStrategy').value.trim(),
+    session: document.getElementById('tradeSession').value,
     side,
     entryPrice: entry,
     exitPrice: exit,
@@ -707,6 +896,7 @@ async function saveTrade(e) {
     pnl: finalPnl,
     pnlPercent: Math.round(pnlPercent * 100) / 100,
     result: finalPnl > 0 ? 'win' : finalPnl < 0 ? 'loss' : 'breakeven',
+    r_multiple: rMultiple,
     account_id: accountId,
     stop_loss_size: stopLossSize,
     risk_percentage: riskPercentage,
@@ -736,6 +926,7 @@ async function saveTrade(e) {
   }
 
   closeTradeModal();
+  updateStrategyOptions();
   refreshPage();
 }
 
@@ -759,6 +950,9 @@ function openTradeDetail(tradeId) {
       <div class="flex items-center gap-3">
         <span class="text-2xl font-bold text-white">${trade.symbol}</span>
         <span class="px-2.5 py-1 rounded-lg text-xs font-bold uppercase ${trade.side === 'long' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}">${trade.side}</span>
+        <span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/5 text-slate-300">${escapeHtml(getAccountNameOf(trade))}</span>
+        <span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-accent/10 text-accent-light">${escapeHtml(getTradeSession(trade) || 'No Session')}</span>
+        ${trade.strategy ? `<span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/5 text-slate-300">${escapeHtml(trade.strategy)}</span>` : ''}
       </div>
       <span class="text-2xl font-bold ${trade.pnl >= 0 ? 'text-profit' : 'text-loss'}">${formatCurrency(trade.pnl)}</span>
     </div>
@@ -784,6 +978,11 @@ function openTradeDetail(tradeId) {
         <span class="text-xs text-slate-500">P&L %</span>
         <p class="text-sm font-semibold ${trade.pnlPercent >= 0 ? 'text-profit' : 'text-loss'} mt-0.5">${trade.pnlPercent >= 0 ? '+' : ''}${trade.pnlPercent}%</p>
       </div>
+      ${trade.r_multiple != null ? `
+      <div class="bg-surface-900/50 rounded-xl p-3">
+        <span class="text-xs text-slate-500">R Multiple</span>
+        <p class="text-sm font-semibold ${trade.r_multiple >= 0 ? 'text-profit' : 'text-loss'} mt-0.5">${trade.r_multiple >= 0 ? '+' : ''}${Number(trade.r_multiple).toFixed(2)}R</p>
+      </div>` : ''}
       <div class="bg-surface-900/50 rounded-xl p-3">
         <span class="text-xs text-slate-500">Duration</span>
         <p class="text-sm font-semibold text-white mt-0.5">${durationH}h</p>
@@ -901,13 +1100,14 @@ function tradeRowHTML(trade) {
         <div class="flex items-center gap-2">
           <span class="text-sm font-semibold text-white">${trade.symbol}</span>
           <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${sideClass}">${trade.side}</span>
+          ${trade.strategy ? `<span class="hidden sm:inline px-1.5 py-0.5 rounded text-[10px] bg-white/5 text-slate-300">${escapeHtml(trade.strategy)}</span>` : ''}
           ${trade.tags && trade.tags.length > 0 ? trade.tags.slice(0, 2).map(t => `<span class="hidden sm:inline px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent-light">${t}</span>`).join('') : ''}
         </div>
-        <p class="text-xs text-slate-500 mt-0.5">${new Date(trade.exitDate).toLocaleDateString()}</p>
+        <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(getAccountNameOf(trade))} | ${new Date(trade.exitDate).toLocaleDateString()}</p>
       </div>
       <div class="text-right">
         <p class="text-sm font-bold ${pnlClass}">${formatCurrency(trade.pnl)}</p>
-        <p class="text-xs ${pnlClass}">${trade.pnlPercent >= 0 ? '+' : ''}${trade.pnlPercent}%</p>
+        <p class="text-xs ${pnlClass}">${trade.r_multiple != null ? `${trade.r_multiple >= 0 ? '+' : ''}${Number(trade.r_multiple).toFixed(2)}R` : `${trade.pnlPercent >= 0 ? '+' : ''}${trade.pnlPercent}%`}</p>
       </div>
     </div>`;
 }
@@ -919,11 +1119,19 @@ function refreshJournal() {
 }
 
 function updateFilterTags() {
-  const tags = getTags();
+  const tags = [...new Set([...TRADE_ENTRY_TAGS, ...getTags()])];
   const select = document.getElementById('filterTag');
   const current = select.value;
   select.innerHTML = '<option value="all">All Tags</option>' + tags.map(t => `<option value="${t}">${t}</option>`).join('');
   select.value = current;
+}
+
+function valueOrDash(value) {
+  return value == null || value === '' ? '--' : value;
+}
+
+function formatPrice(value) {
+  return value == null || Number.isNaN(Number(value)) ? '--' : Number(value).toString();
 }
 
 function renderJournal() {
@@ -935,7 +1143,11 @@ function renderJournal() {
   const sort = document.getElementById('sortBy').value;
 
   if (search) {
-    trades = trades.filter(t => t.symbol.toLowerCase().includes(search) || (t.notes && t.notes.toLowerCase().includes(search)));
+    trades = trades.filter(t =>
+      t.symbol.toLowerCase().includes(search) ||
+      (t.strategy && t.strategy.toLowerCase().includes(search)) ||
+      (t.notes && t.notes.toLowerCase().includes(search))
+    );
   }
   if (side !== 'all') trades = trades.filter(t => t.side === side);
   if (result !== 'all') trades = trades.filter(t => t.result === result);
@@ -960,6 +1172,7 @@ function renderJournal() {
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-base font-semibold text-white">${t.symbol}</span>
             <span class="px-2 py-0.5 rounded text-[11px] font-bold uppercase ${t.side === 'long' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}">${t.side}</span>
+            ${t.strategy ? `<span class="px-2 py-0.5 rounded text-[11px] bg-white/5 text-slate-300">${escapeHtml(t.strategy)}</span>` : ''}
             ${t.tags ? t.tags.map(tag => `<span class="px-2 py-0.5 rounded text-[11px] bg-accent/10 text-accent-light">${tag}</span>`).join('') : ''}
           </div>
           <div class="flex items-center gap-3 mt-1.5">
@@ -970,11 +1183,112 @@ function renderJournal() {
         </div>
         <div class="text-right shrink-0">
           <p class="text-lg font-bold ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}">${formatCurrency(t.pnl)}</p>
-          <p class="text-xs ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}">${t.pnlPercent >= 0 ? '+' : ''}${t.pnlPercent}%</p>
+          <p class="text-xs ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}">${t.r_multiple != null ? `${t.r_multiple >= 0 ? '+' : ''}${Number(t.r_multiple).toFixed(2)}R` : `${t.pnlPercent >= 0 ? '+' : ''}${t.pnlPercent}%`}</p>
         </div>
       </div>
     `).join('');
   }
+}
+
+function renderJournal() {
+  let trades = getScopedTrades();
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const side = document.getElementById('filterSide').value;
+  const result = document.getElementById('filterResult').value;
+  const session = document.getElementById('filterSession').value;
+  const tag = document.getElementById('filterTag').value;
+  const sort = document.getElementById('sortBy').value;
+
+  if (search) {
+    trades = trades.filter(t =>
+      t.symbol.toLowerCase().includes(search) ||
+      getTradeSession(t).toLowerCase().includes(search) ||
+      (t.strategy && t.strategy.toLowerCase().includes(search)) ||
+      (t.tags && t.tags.join(' ').toLowerCase().includes(search)) ||
+      (t.emotion && t.emotion.toLowerCase().includes(search)) ||
+      (t.lesson && t.lesson.toLowerCase().includes(search)) ||
+      (t.notes && t.notes.toLowerCase().includes(search))
+    );
+  }
+  if (side !== 'all') trades = trades.filter(t => t.side === side);
+  if (result !== 'all') trades = trades.filter(t => t.result === result);
+  if (session !== 'all') trades = trades.filter(t => getTradeSession(t) === session);
+  if (tag !== 'all') trades = trades.filter(t => t.tags && t.tags.includes(tag));
+
+  switch (sort) {
+    case 'date-desc': trades.sort((a, b) => new Date(b.exitDate) - new Date(a.exitDate)); break;
+    case 'date-asc': trades.sort((a, b) => new Date(a.exitDate) - new Date(b.exitDate)); break;
+    case 'pnl-desc': trades.sort((a, b) => b.pnl - a.pnl); break;
+    case 'pnl-asc': trades.sort((a, b) => a.pnl - b.pnl); break;
+  }
+
+  const container = document.getElementById('journalList');
+  if (trades.length === 0) {
+    container.innerHTML = '<p class="text-slate-500 text-sm text-center py-12">No trades found matching your filters.</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="overflow-x-auto rounded-2xl border border-white/5 bg-surface-800/50 backdrop-blur">
+      <table class="min-w-[1280px] w-full text-left text-sm">
+        <thead class="bg-surface-900/70 text-[11px] uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="px-4 py-3">Trade</th>
+            <th class="px-3 py-3">Account</th>
+            <th class="px-3 py-3">Session</th>
+            <th class="px-3 py-3">Setup Tag</th>
+            <th class="px-3 py-3">Entry / Exit</th>
+            <th class="px-3 py-3 text-right">Lots</th>
+            <th class="px-3 py-3 text-right">Fees</th>
+            <th class="px-3 py-3 text-right">P&L</th>
+            <th class="px-3 py-3 text-right">R</th>
+            <th class="px-3 py-3 text-right">Plan Risk</th>
+            <th class="px-3 py-3">Risk</th>
+            <th class="px-3 py-3">SL / TP</th>
+            <th class="px-3 py-3">Psychology</th>
+            <th class="px-4 py-3">Closed</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/5">
+          ${trades.map(t => {
+            const sessionName = getTradeSession(t) || '--';
+            const accountName = getAccountNameOf(t);
+            const setupTag = t.tags && t.tags.length ? t.tags[0] : '--';
+            const pnlClass = t.pnl >= 0 ? 'text-profit' : 'text-loss';
+            const riskText = t.risk_percentage != null ? `${Number(t.risk_percentage).toFixed(2)}% ${riskFlagLabel(t.risk_flag)}` : '--';
+            const planRisk = t.stop_loss_size != null ? formatCurrency(Number(t.stop_loss_size)) : '--';
+            const rText = t.r_multiple != null ? `${t.r_multiple >= 0 ? '+' : ''}${Number(t.r_multiple).toFixed(2)}R` : '--';
+            const psychology = [t.emotion, t.confidence ? `C${t.confidence}` : '', t.discipline ? `D${t.discipline}` : ''].filter(Boolean).join(' / ') || '--';
+            return `
+              <tr class="trade-row cursor-pointer hover:bg-white/[0.03] transition" onclick="openTradeDetail('${t.id}')">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <span class="font-semibold text-white">${escapeHtml(t.symbol)}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${t.side === 'long' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}">${t.side}</span>
+                  </div>
+                  <div class="mt-1 max-w-[180px] truncate text-xs text-slate-500">${escapeHtml(t.strategy || 'No strategy')}</div>
+                </td>
+                <td class="px-3 py-3 text-slate-300">${escapeHtml(accountName)}</td>
+                <td class="px-3 py-3 text-slate-300">${escapeHtml(sessionName)}</td>
+                <td class="px-3 py-3">${setupTag === '--' ? '<span class="text-slate-600">--</span>' : `<span class="px-2 py-1 rounded-lg bg-accent/10 text-accent-light text-xs font-medium">${escapeHtml(setupTag)}</span>`}</td>
+                <td class="px-3 py-3 text-slate-300">
+                  <div>${formatPrice(t.entryPrice)} -> ${formatPrice(t.exitPrice)}</div>
+                  <div class="text-xs text-slate-600">${new Date(t.entryDate).toLocaleDateString()}</div>
+                </td>
+                <td class="px-3 py-3 text-right text-slate-300">${valueOrDash(t.quantity)}</td>
+                <td class="px-3 py-3 text-right text-slate-300">${formatCurrency(t.fees || 0)}</td>
+                <td class="px-3 py-3 text-right font-semibold ${pnlClass}">${formatCurrency(t.pnl)}</td>
+                <td class="px-3 py-3 text-right font-semibold ${t.r_multiple == null || t.r_multiple >= 0 ? 'text-profit' : 'text-loss'}">${rText}</td>
+                <td class="px-3 py-3 text-right text-slate-300">${planRisk}</td>
+                <td class="px-3 py-3 ${riskFlagClass(t.risk_flag)}">${riskText}</td>
+                <td class="px-3 py-3 text-slate-300">${formatPrice(t.planned_sl)} / ${formatPrice(t.planned_tp)}</td>
+                <td class="px-3 py-3 text-slate-300">${escapeHtml(psychology)}</td>
+                <td class="px-4 py-3 text-slate-500">${new Date(t.exitDate).toLocaleDateString()}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 // ============ CALENDAR ============
@@ -1103,8 +1417,67 @@ function refreshAnalytics() {
   renderWeeklyPnlChart(trades);
   renderDurationChart(trades);
   renderStreakAnalysis(trades);
+  renderStrategyStats(trades);
   renderWeeklySessionSummary();
   renderRiskAnalytics();
+}
+
+function renderStrategyStats(trades) {
+  const container = document.getElementById('strategyStatsContent');
+  if (!container) return;
+  const byStrategy = {};
+  trades.forEach(t => {
+    const strategy = (t.strategy || 'Unassigned').trim() || 'Unassigned';
+    if (!byStrategy[strategy]) {
+      byStrategy[strategy] = { count: 0, wins: 0, pnl: 0, rTotal: 0, rCount: 0 };
+    }
+    byStrategy[strategy].count += 1;
+    byStrategy[strategy].wins += t.pnl > 0 ? 1 : 0;
+    byStrategy[strategy].pnl += t.pnl || 0;
+    if (t.r_multiple != null && !isNaN(Number(t.r_multiple))) {
+      byStrategy[strategy].rTotal += Number(t.r_multiple);
+      byStrategy[strategy].rCount += 1;
+    }
+  });
+
+  const rows = Object.entries(byStrategy)
+    .map(([strategy, s]) => ({
+      strategy,
+      ...s,
+      winRate: s.count ? (s.wins / s.count) * 100 : 0,
+      avgR: s.rCount ? s.rTotal / s.rCount : null,
+    }))
+    .sort((a, b) => b.pnl - a.pnl);
+
+  if (rows.length === 0) {
+    container.innerHTML = '<p class="text-slate-500 text-sm text-center py-6">Add strategies to trades to see your playbook edge.</p>';
+    return;
+  }
+
+  container.innerHTML = rows.map(row => `
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 items-center p-3 rounded-xl bg-surface-900/50 border border-white/5">
+      <div class="col-span-2 md:col-span-1 min-w-0">
+        <p class="text-sm font-semibold text-white truncate">${escapeHtml(row.strategy)}</p>
+        <p class="text-[11px] text-slate-500">${row.count} trade${row.count === 1 ? '' : 's'}</p>
+      </div>
+      <div>
+        <p class="text-[11px] text-slate-500">Win Rate</p>
+        <p class="text-sm font-semibold text-white">${row.winRate.toFixed(1)}%</p>
+      </div>
+      <div>
+        <p class="text-[11px] text-slate-500">Total P&L</p>
+        <p class="text-sm font-semibold ${row.pnl >= 0 ? 'text-profit' : 'text-loss'}">${formatCurrency(row.pnl)}</p>
+      </div>
+      <div>
+        <p class="text-[11px] text-slate-500">Avg R</p>
+        <p class="text-sm font-semibold ${row.avgR == null || row.avgR >= 0 ? 'text-profit' : 'text-loss'}">${row.avgR == null ? '--' : `${row.avgR >= 0 ? '+' : ''}${row.avgR.toFixed(2)}R`}</p>
+      </div>
+      <div>
+        <p class="text-[11px] text-slate-500">Net R</p>
+        <p class="text-sm font-semibold ${row.rTotal >= 0 ? 'text-profit' : 'text-loss'}">${row.rCount ? `${row.rTotal >= 0 ? '+' : ''}${row.rTotal.toFixed(2)}R` : '--'}</p>
+      </div>
+    </div>
+  `).join('');
 }
 
 function renderWeeklyPnlChart(trades) {
@@ -1178,13 +1551,9 @@ function renderWeeklySessionSummaryLocal() {
   if (!el) return;
   el.innerHTML = '';
   const trades = getScopedTrades();
-  const sessions = { premarket: { count: 0, wins: 0 }, market: { count: 0, wins: 0 }, postmarket: { count: 0, wins: 0 } };
+  const sessions = { Asia: { count: 0, wins: 0 }, London: { count: 0, wins: 0 }, 'New York': { count: 0, wins: 0 } };
   trades.forEach(r => {
-    const d = new Date(r.entryDate || r.exitDate);
-    const minutes = d.getHours() * 60 + d.getMinutes();
-    let key = 'market';
-    if (minutes < 570) key = 'premarket';
-    else if (minutes >= 960) key = 'postmarket';
+    const key = getTradeSession(r) || 'London';
     sessions[key].count += 1;
     if (r.pnl > 0) sessions[key].wins += 1;
   });
@@ -1551,12 +1920,17 @@ function renderAcctRiskChart(data) {
     fill: false,
     tension: 0.3,
     pointRadius: 3,
-    pointBackgroundColor: values.map(v => v > 1.0 ? '#ef4444' : v < 0.2 ? '#f59e0b' : '#22c55e'),
+    pointBackgroundColor: values.map(v => {
+      const flag = getRiskClassification(v).flag;
+      if (flag === 'violation') return '#ef4444';
+      if (flag === 'conservative') return '#f59e0b';
+      return '#22c55e';
+    }),
     borderWidth: 2,
   }];
   if (labels.length > 0) {
-    datasets.push(referenceLineDataset('1.0% Max', 1.0, labels.length, '#ef4444'));
-    datasets.push(referenceLineDataset('0.2% Min', 0.2, labels.length, '#f59e0b'));
+    datasets.push(referenceLineDataset(`${riskSettings.maxRiskPct}% Max`, riskSettings.maxRiskPct, labels.length, '#ef4444'));
+    datasets.push(referenceLineDataset(`${riskSettings.minRiskPct}% Min`, riskSettings.minRiskPct, labels.length, '#f59e0b'));
   }
   charts.acctRisk = new Chart(canvas, {
     type: 'line',
@@ -1595,17 +1969,17 @@ function renderRiskRecommendation(data) {
   const inDrawdown = account ? account.currentBalance < account.accountSize : false;
 
   let text, cls;
-  if (inDrawdown && avgRisk >= 0.9) {
-    text = '📉 RECOMMENDATION: SIZE DOWN. Reduce risk to 0.5% until recovering from drawdown.';
+  if (inDrawdown && avgRisk > riskSettings.drawdownSizeDownPct) {
+    text = `RECOMMENDATION: SIZE DOWN. Reduce risk toward ${riskSettings.drawdownSizeDownPct}% until recovering from drawdown.`;
     cls = 'bg-loss/10 text-loss';
-  } else if (balanceChangePct > 5 && avgRisk < 0.6) {
-    text = '📈 RECOMMENDATION: SIZE UP. Consider increasing lot size to target 0.8% risk.';
+  } else if (balanceChangePct > 5 && avgRisk < riskSettings.growthSizeUpPct) {
+    text = `RECOMMENDATION: SIZE UP. Consider increasing lot size toward ${riskSettings.growthSizeUpPct}% risk.`;
     cls = 'bg-profit/10 text-profit';
-  } else if (avgRisk >= 0.5 && avgRisk <= 0.9 && Math.abs(balanceChangePct) <= 5) {
-    text = '✅ RECOMMENDATION: MAINTAIN. Risk allocation is optimal.';
+  } else if (avgRisk >= riskSettings.minRiskPct && avgRisk <= riskSettings.maxRiskPct && Math.abs(balanceChangePct) <= 5) {
+    text = 'RECOMMENDATION: MAINTAIN. Risk allocation is inside your rules.';
     cls = 'bg-accent/10 text-accent-light';
   } else {
-    text = `Avg risk ${avgRisk.toFixed(2)}% over last ${recentRisks.length} trade(s), balance ${balanceChangePct >= 0 ? '+' : ''}${balanceChangePct.toFixed(1)}%. No strong signal — keep monitoring discipline.`;
+    text = `Avg risk ${avgRisk.toFixed(2)}% over last ${recentRisks.length} trade(s), balance ${balanceChangePct >= 0 ? '+' : ''}${balanceChangePct.toFixed(1)}%. No strong signal - keep monitoring discipline.`;
     cls = 'bg-white/5 text-slate-400';
   }
   el.className = 'mt-4 p-4 rounded-xl text-sm font-medium ' + cls;
@@ -1616,6 +1990,53 @@ function renderRiskRecommendation(data) {
 // ============ SETTINGS ============
 function refreshSettings() {
   renderTagsList();
+  renderRiskSettingsForm();
+}
+
+function renderRiskSettingsForm() {
+  const min = document.getElementById('riskMinPct');
+  const max = document.getElementById('riskMaxPct');
+  const drawdown = document.getElementById('riskDrawdownPct');
+  const growth = document.getElementById('riskGrowthPct');
+  const status = document.getElementById('riskSettingsStatus');
+  if (!min || !max || !drawdown || !growth) return;
+  min.value = riskSettings.minRiskPct;
+  max.value = riskSettings.maxRiskPct;
+  drawdown.value = riskSettings.drawdownSizeDownPct;
+  growth.value = riskSettings.growthSizeUpPct;
+  if (status) {
+    status.textContent = serverAvailable ? 'Synced with local server' : 'Saved in this browser';
+  }
+}
+
+async function saveRiskSettings(event) {
+  event.preventDefault();
+  const next = normalizeRiskSettings({
+    minRiskPct: document.getElementById('riskMinPct').value,
+    maxRiskPct: document.getElementById('riskMaxPct').value,
+    drawdownSizeDownPct: document.getElementById('riskDrawdownPct').value,
+    growthSizeUpPct: document.getElementById('riskGrowthPct').value,
+  });
+
+  try {
+    if (serverAvailable) {
+      const res = await fetch('/api/settings/risk', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error('Unable to save risk settings');
+      saveRiskSettingsToLocal(await res.json());
+    } else {
+      saveRiskSettingsToLocal(next);
+    }
+    renderRiskSettingsForm();
+    updateRiskPreview();
+    refreshPage();
+    showToast('Risk rules saved');
+  } catch (e) {
+    showToast('Failed to save risk rules');
+  }
 }
 
 function renderTagsList() {
@@ -1659,15 +2080,46 @@ async function syncRemoveTagFromServer(tag) {
   } catch (e) { }
 }
 
-function exportData() {
-  const trades = getTrades();
-  const blob = new Blob([JSON.stringify(trades, null, 2)], { type: 'application/json' });
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `tradevault-export-${new Date().toISOString().split('T')[0]}.json`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function exportFullBackup() {
+  try {
+    let backup;
+    if (serverAvailable) {
+      const res = await fetch('/api/backup');
+      if (!res.ok) throw new Error('Backup failed');
+      backup = await res.json();
+    } else {
+      backup = {
+        app: 'TradeVault',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        source: 'local-browser-storage',
+        trades: getTrades(),
+        tags: getTags(),
+        accounts: cachedAccounts,
+        balanceSnapshots: [],
+        settings: { risk: riskSettings },
+      };
+    }
+    downloadJson(backup, `tradevault-full-backup-${new Date().toISOString().split('T')[0]}.json`);
+    showToast('Full backup exported!');
+  } catch {
+    showToast('Could not export full backup');
+  }
+}
+
+function exportData() {
+  const trades = getTrades();
+  downloadJson(trades, `tradevault-export-${new Date().toISOString().split('T')[0]}.json`);
   showToast('Data exported!');
 }
 
@@ -1698,11 +2150,16 @@ async function importData(event) {
 function exportCSV() {
   const trades = getTrades();
   if (trades.length === 0) { showToast('No trades to export'); return; }
-  const headers = ['Symbol', 'Side', 'Entry Price', 'Exit Price', 'Quantity', 'Fees', 'P&L', 'P&L %', 'Entry Date', 'Exit Date', 'Tags', 'Notes'];
+  const headers = ['Symbol', 'Account', 'Strategy', 'Session', 'Setup Tag', 'Side', 'Entry Price', 'Exit Price', 'Quantity', 'Fees', 'P&L', 'P&L %', 'R Multiple', 'Plan Risk', 'Risk %', 'Risk Flag', 'Planned SL', 'Planned TP', 'Actual SL', 'Actual P&L', 'Confidence', 'Discipline', 'Emotion', 'Lesson', 'Entry Date', 'Exit Date', 'Notes'];
   const rows = trades.map(t => [
-    t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0,
-    t.pnl, t.pnlPercent, t.entryDate, t.exitDate,
-    t.tags ? t.tags.join(';') : '', (t.notes || '').replace(/"/g, '""')
+    t.symbol, getAccountNameOf(t), t.strategy || '', getTradeSession(t), t.tags && t.tags.length ? t.tags[0] : '', t.side,
+    t.entryPrice, t.exitPrice, t.quantity, t.fees || 0, t.pnl, t.pnlPercent,
+    t.r_multiple != null ? t.r_multiple : '', t.stop_loss_size != null ? t.stop_loss_size : '',
+    t.risk_percentage != null ? t.risk_percentage : '', t.risk_flag || '',
+    t.planned_sl != null ? t.planned_sl : '', t.planned_tp != null ? t.planned_tp : '',
+    t.actual_sl != null ? t.actual_sl : '', t.actual_pnl != null ? t.actual_pnl : '',
+    t.confidence || '', t.discipline || '', t.emotion || '', t.lesson || '',
+    t.entryDate, t.exitDate, (t.notes || '').replace(/"/g, '""')
   ]);
   const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${v}"`).join(','))].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
