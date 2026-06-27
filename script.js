@@ -1662,11 +1662,26 @@ function renderWinLossChart(wins, losses, breakeven) {
   });
 }
 
+function getOrRestoreCanvas(chartKey, canvasId) {
+  destroyChart(chartKey);
+  let canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const parent = canvas.parentElement;
+  if (!parent) return null;
+  parent.innerHTML = `<canvas id="${canvasId}"></canvas>`;
+  return document.getElementById(canvasId);
+}
+
+function showEmptyChart(canvasId, message) {
+  const canvas = document.getElementById(canvasId);
+  if (canvas && canvas.parentElement) {
+    canvas.parentElement.innerHTML = `<p class="text-slate-500 text-sm text-center py-16">${message}</p>`;
+  }
+}
+
 function renderSymbolPnlChart(trades) {
-  destroyChart('symbolPnl');
-  const container = document.getElementById('symbolPnlChart');
-  if (!container) return;
-  const parent = container.parentElement;
+  const canvas = getOrRestoreCanvas('symbolPnl', 'symbolPnlChart');
+  if (!canvas) return;
 
   const bySymbol = {};
   trades.forEach(t => {
@@ -1676,7 +1691,7 @@ function renderSymbolPnlChart(trades) {
   const sorted = Object.entries(bySymbol).sort((a, b) => b[1] - a[1]);
 
   if (sorted.length === 0) {
-    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No trade data available.</p>';
+    showEmptyChart('symbolPnlChart', 'No trade data available.');
     return;
   }
 
@@ -1684,24 +1699,16 @@ function renderSymbolPnlChart(trades) {
   const data = sorted.map(s => Math.round(s[1] * 100) / 100);
   const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
 
-  charts.symbolPnl = new Chart(container, {
+  charts.symbolPnl = new Chart(canvas, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{ data, backgroundColor: colors, borderRadius: 6 }]
-    },
-    options: {
-      ...chartDefaults,
-      indexAxis: 'y',
-    }
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6 }] },
+    options: { ...chartDefaults, indexAxis: 'y' }
   });
 }
 
 function renderTagPnlChart(trades) {
-  destroyChart('tagPnl');
-  const container = document.getElementById('tagPnlChart');
-  if (!container) return;
-  const parent = container.parentElement;
+  const canvas = getOrRestoreCanvas('tagPnl', 'tagPnlChart');
+  if (!canvas) return;
 
   const byTag = {};
   trades.forEach(t => {
@@ -1715,7 +1722,7 @@ function renderTagPnlChart(trades) {
   const sorted = Object.entries(byTag).sort((a, b) => b[1] - a[1]);
 
   if (sorted.length === 0) {
-    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No tagged trades yet.</p>';
+    showEmptyChart('tagPnlChart', 'No tagged trades yet.');
     return;
   }
 
@@ -1723,24 +1730,16 @@ function renderTagPnlChart(trades) {
   const data = sorted.map(s => Math.round(s[1] * 100) / 100);
   const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
 
-  charts.tagPnl = new Chart(container, {
+  charts.tagPnl = new Chart(canvas, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{ data, backgroundColor: colors, borderRadius: 6 }]
-    },
-    options: {
-      ...chartDefaults,
-      indexAxis: 'y',
-    }
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6 }] },
+    options: { ...chartDefaults, indexAxis: 'y' }
   });
 }
 
 function renderExitTypeChart(trades) {
-  destroyChart('exitType');
-  const container = document.getElementById('exitTypeChart');
-  if (!container) return;
-  const parent = container.parentElement;
+  const canvas = getOrRestoreCanvas('exitType', 'exitTypeChart');
+  if (!canvas) return;
 
   const byType = {};
   trades.forEach(t => {
@@ -1754,7 +1753,7 @@ function renderExitTypeChart(trades) {
 
   const entries = Object.entries(byType).sort((a, b) => b[1].pnl - a[1].pnl);
   if (entries.length === 0) {
-    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No exit type data yet. Select a type of exit when logging trades.</p>';
+    showEmptyChart('exitTypeChart', 'No exit type data yet. Select a type of exit when logging trades.');
     return;
   }
 
@@ -1762,21 +1761,16 @@ function renderExitTypeChart(trades) {
   const data = entries.map(([, v]) => Math.round(v.pnl * 100) / 100);
   const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
 
-  charts.exitType = new Chart(container, {
+  charts.exitType = new Chart(canvas, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{ data, backgroundColor: colors, borderRadius: 6 }]
-    },
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6 }] },
     options: { ...chartDefaults, indexAxis: 'y' }
   });
 }
 
 function renderTradeManagementChart(trades) {
-  destroyChart('tradeManagement');
-  const container = document.getElementById('tradeManagementChart');
-  if (!container) return;
-  const parent = container.parentElement;
+  const canvas = getOrRestoreCanvas('tradeManagement', 'tradeManagementChart');
+  if (!canvas) return;
 
   const byStyle = {};
   trades.forEach(t => {
@@ -1790,7 +1784,7 @@ function renderTradeManagementChart(trades) {
 
   const entries = Object.entries(byStyle).sort((a, b) => b[1].pnl - a[1].pnl);
   if (entries.length === 0) {
-    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No management style data yet. Select a trade management style when logging trades.</p>';
+    showEmptyChart('tradeManagementChart', 'No management style data yet. Select a trade management style when logging trades.');
     return;
   }
 
@@ -1798,12 +1792,9 @@ function renderTradeManagementChart(trades) {
   const data = entries.map(([, v]) => Math.round(v.pnl * 100) / 100);
   const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
 
-  charts.tradeManagement = new Chart(container, {
+  charts.tradeManagement = new Chart(canvas, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{ data, backgroundColor: colors, borderRadius: 6 }]
-    },
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6 }] },
     options: { ...chartDefaults, indexAxis: 'y' }
   });
 }
@@ -2266,35 +2257,34 @@ function renderPsychologyAnalytics(trades) {
     worstEmotionEl.className = 'text-lg font-bold text-slate-400';
   }
 
-  const emotionCanvas = document.getElementById('emotionPnlChart');
+  const emotionCanvas = getOrRestoreCanvas('emotionPnl', 'emotionPnlChart');
   if (emotionCanvas) {
     const emos = Object.keys(emotionStats);
-    const pnlValues = emos.map(emo => emotionStats[emo].pnl);
-    const colors = pnlValues.map(v => v >= 0 ? '#22c55e' : '#ef4444');
-
-    charts.emotionPnl = new Chart(emotionCanvas, {
-      type: 'bar',
-      data: {
-        labels: emos,
-        datasets: [{
-          data: pnlValues,
-          backgroundColor: colors,
-          borderRadius: 6
-        }]
-      },
-      options: {
-        ...chartDefaults,
-        indexAxis: 'y',
-        plugins: {
-          ...chartDefaults.plugins,
-          tooltip: {
-            callbacks: {
-              label: ctx => `PnL: ${formatCurrency(ctx.parsed.x)} (${emotionStats[ctx.label].wins}/${emotionStats[ctx.label].count} wins)`
+    if (emos.length === 0) {
+      showEmptyChart('emotionPnlChart', 'No emotion data yet. Add an emotion when logging trades.');
+    } else {
+      const pnlValues = emos.map(emo => Math.round(emotionStats[emo].pnl * 100) / 100);
+      const colors = pnlValues.map(v => v >= 0 ? '#22c55e' : '#ef4444');
+      charts.emotionPnl = new Chart(emotionCanvas, {
+        type: 'bar',
+        data: {
+          labels: emos,
+          datasets: [{ data: pnlValues, backgroundColor: colors, borderRadius: 6 }]
+        },
+        options: {
+          ...chartDefaults,
+          indexAxis: 'y',
+          plugins: {
+            ...chartDefaults.plugins,
+            tooltip: {
+              callbacks: {
+                label: ctx => `PnL: ${formatCurrency(ctx.parsed.x)} (${emotionStats[ctx.label].wins}/${emotionStats[ctx.label].count} wins)`
+              }
             }
           }
         }
-      }
-    });
+      });
+    }
   }
 
   const disciplineCanvas = document.getElementById('disciplinePerformanceChart');
