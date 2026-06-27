@@ -111,6 +111,22 @@ async function initSchema() {
   }
   await runAsync('CREATE INDEX IF NOT EXISTS idx_trades_account_id ON trades (account_id)');
   await runAsync('CREATE INDEX IF NOT EXISTS idx_trades_account_exit_date ON trades (account_id, exitDate)');
+
+  // One-time fix: migrate existing initial snapshots to epoch so all historical
+  // trades count towards the running balance. We identify initial snapshots as
+  // the earliest snapshot (by created_at) per account whose effective_date is
+  // NOT already the epoch sentinel and NOT already a manual checkpoint
+  // (i.e. effective_date ≈ created_at, meaning it was auto-generated at account creation).
+  await runAsync(`
+    UPDATE balance_snapshots
+    SET effective_date = '1970-01-01T00:00:00.000Z'
+    WHERE effective_date <> '1970-01-01T00:00:00.000Z'
+      AND (account_id, created_at) IN (
+        SELECT account_id, MIN(created_at)
+        FROM balance_snapshots
+        GROUP BY account_id
+      )
+  `);
 }
 
 const schemaReady = initSchema().catch(err => {
@@ -137,16 +153,21 @@ function getLatestSnapshot(accountId) {
 }
 
 // Running balance = latest snapshot balance + SUM(pnl of trades after the snapshot date).
+// The initial (first) snapshot always uses epoch so ALL historical trades count.
+// Subsequent manual snapshots use their own effective_date (checkpoint behaviour).
 async function getRunningBalance(accountId) {
   const snap = await getLatestSnapshot(accountId);
   if (!snap) {
     const acc = await getAsync('SELECT account_size FROM accounts WHERE id = ?', [accountId]);
     return acc ? acc.account_size : 0;
   }
+  // If the snapshot effective_date is the epoch sentinel it means "count all trades"
+  const isInitial = snap.effective_date === '1970-01-01T00:00:00.000Z';
   const row = await getAsync(
-    `SELECT COALESCE(SUM(pnl), 0) AS total FROM trades
-     WHERE account_id = ? AND exitDate >= ?`,
-    [accountId, snap.effective_date]
+    isInitial
+      ? `SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE account_id = ?`
+      : `SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE account_id = ? AND exitDate > ?`,
+    isInitial ? [accountId] : [accountId, snap.effective_date]
   );
   return snap.snapshot_balance + (row ? row.total : 0);
 }
@@ -530,9 +551,10 @@ app.post('/api/accounts', async (req, res) => {
       'INSERT INTO accounts (id, name, account_size, created_at) VALUES (?, ?, ?, ?)',
       [id, name, size, now]
     );
+    // Initial snapshot uses epoch so ALL historical trades count towards running balance.
     await runAsync(
       'INSERT INTO balance_snapshots (id, account_id, snapshot_balance, effective_date, created_at) VALUES (?, ?, ?, ?, ?)',
-      [genId('snap'), id, balance, now, now]
+      [genId('snap'), id, balance, '1970-01-01T00:00:00.000Z', now]
     );
     const acc = await getAsync('SELECT * FROM accounts WHERE id = ?', [id]);
     res.json(await buildAccountSummary(acc));
@@ -630,6 +652,7 @@ app.get('/api/accounts/:id/analytics', async (req, res) => {
     const snap = await getLatestSnapshot(acc.id);
     const baseBalance = snap ? snap.snapshot_balance : acc.account_size;
     const effectiveDate = snap ? snap.effective_date : null;
+    const isInitialSnap = effectiveDate === '1970-01-01T00:00:00.000Z';
 
     const trades = await allAsync(
       'SELECT * FROM trades WHERE account_id = ? ORDER BY exitDate ASC, created_at ASC',
@@ -637,9 +660,12 @@ app.get('/api/accounts/:id/analytics', async (req, res) => {
     );
 
     // Equity curve = running balance after each trade that follows the latest snapshot.
-    const curveTrades = effectiveDate ? trades.filter(t => t.exitDate >= effectiveDate) : trades;
+    // If it's the initial epoch sentinel, include ALL trades (no date filter).
+    const curveTrades = (!effectiveDate || isInitialSnap)
+      ? trades
+      : trades.filter(t => t.exitDate > effectiveDate);
     const equityCurve = [];
-    if (effectiveDate) {
+    if (effectiveDate && !isInitialSnap) {
       equityCurve.push({ x: effectiveDate, y: baseBalance, label: 'Snapshot' });
     }
     let running = baseBalance;
