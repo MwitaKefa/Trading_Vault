@@ -1662,19 +1662,29 @@ function renderWinLossChart(wins, losses, breakeven) {
   });
 }
 
+// Cache of canvas-id → parent element so we can restore canvases even after
+// showEmptyChart has replaced their innerHTML with a message <p>.
+const _chartParents = {};
+
 function getOrRestoreCanvas(chartKey, canvasId) {
   destroyChart(chartKey);
-  let canvas = document.getElementById(canvasId);
-  if (!canvas) return null;
-  const parent = canvas.parentElement;
+  const canvas = document.getElementById(canvasId);
+  // Cache the parent while we still have it, or reuse a previously cached ref.
+  if (canvas && canvas.parentElement) {
+    _chartParents[canvasId] = canvas.parentElement;
+  }
+  const parent = _chartParents[canvasId];
   if (!parent) return null;
+  // Always write a fresh canvas so Chart.js gets a clean element.
   parent.innerHTML = `<canvas id="${canvasId}"></canvas>`;
   return document.getElementById(canvasId);
 }
 
 function showEmptyChart(canvasId, message) {
+  // Cache the parent before wiping it so getOrRestoreCanvas can find it next time.
   const canvas = document.getElementById(canvasId);
   if (canvas && canvas.parentElement) {
+    _chartParents[canvasId] = canvas.parentElement;
     canvas.parentElement.innerHTML = `<p class="text-slate-500 text-sm text-center py-16">${message}</p>`;
   }
 }
