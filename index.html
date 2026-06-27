@@ -275,6 +275,42 @@
         <h3 class="text-sm font-semibold text-white mb-4">Strategy Edge</h3>
         <div id="strategyStatsContent" class="space-y-2"></div>
       </div>
+      <!-- Psychology & Behavior Analytics -->
+      <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6 mb-6">
+        <h3 class="text-sm font-semibold text-white mb-4">Psychological Edge & Correlation</h3>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">High Discipline Avg P&L (4-5★)</p>
+            <p id="highDisciplinePnl" class="text-lg font-bold text-profit">$0.00</p>
+          </div>
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">Low Discipline Avg P&L (1-2★)</p>
+            <p id="lowDisciplinePnl" class="text-lg font-bold text-loss">$0.00</p>
+          </div>
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">Most Profitable Emotion</p>
+            <p id="bestEmotion" class="text-lg font-bold text-emerald-400">—</p>
+          </div>
+          <div class="text-center p-4 rounded-xl bg-surface-900/50">
+            <p class="text-xs text-slate-500 mb-1">Most Destructive Emotion</p>
+            <p id="worstEmotion" class="text-lg font-bold text-loss">—</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            <h4 class="text-xs font-semibold text-slate-400 mb-3">P&L by Emotion</h4>
+            <div class="h-64">
+              <canvas id="emotionPnlChart"></canvas>
+            </div>
+          </div>
+          <div>
+            <h4 class="text-xs font-semibold text-slate-400 mb-3">Discipline Performance</h4>
+            <div class="h-64">
+              <canvas id="disciplinePerformanceChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
           <h3 class="text-sm font-semibold text-white mb-4">Weekly P&L</h3>
@@ -341,6 +377,25 @@
             <h3 class="text-sm font-semibold text-white mb-4">Risk Trend</h3>
             <div class="h-64"><canvas id="acctRiskChart"></canvas></div>
             <div id="riskRecommendation" class="mt-4 p-4 rounded-xl text-sm font-medium hidden"></div>
+          </div>
+          <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+            <h3 class="text-sm font-semibold text-white mb-4">Daily Drawdown Violations & Overtrading</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="p-4 rounded-xl bg-surface-900/50 flex flex-col justify-between">
+                <div>
+                  <p class="text-xs text-slate-500 mb-1">Drawdown Breach Days</p>
+                  <p id="drawdownBreachDays" class="text-2xl font-bold text-loss">0</p>
+                </div>
+                <p class="text-xs text-slate-400 mt-2">Days where cumulative intraday loss exceeded the Max Daily Drawdown setting.</p>
+              </div>
+              <div class="p-4 rounded-xl bg-surface-900/50 flex flex-col justify-between">
+                <div>
+                  <p class="text-xs text-slate-500 mb-1">Post-Drawdown Revenge Trades</p>
+                  <p id="postDrawdownTradesCount" class="text-2xl font-bold text-amber-400">0</p>
+                </div>
+                <p class="text-xs text-slate-400 mt-2">Trades logged on a day after the daily drawdown limit was already breached.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -448,6 +503,14 @@
               <div>
                 <label class="block text-xs font-medium text-slate-400 mb-1.5">Growth Target %</label>
                 <input id="riskGrowthPct" type="number" min="0" step="0.01" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">Max Daily Drawdown ($)</label>
+                <input id="riskDailyDrawdownValue" type="number" min="0" step="0.01" placeholder="Disabled (0)" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1.5">Max Daily Drawdown (%)</label>
+                <input id="riskDailyDrawdownPct" type="number" min="0" step="0.01" placeholder="Disabled (0)" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-accent/50 transition">
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-3">

@@ -32,6 +32,7 @@ html { scroll-behavior: smooth; }
 }
 .cal-cell:hover {
   background: rgba(255,255,255,0.03);
+  filter: brightness(1.15);
 }
 
 /* Modal animation */

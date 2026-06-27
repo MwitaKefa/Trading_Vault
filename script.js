@@ -11,11 +11,15 @@ const DEFAULT_RISK_SETTINGS = {
   maxRiskPct: 1.0,
   drawdownSizeDownPct: 0.5,
   growthSizeUpPct: 0.8,
+  dailyDrawdownLimitValue: 0,
+  dailyDrawdownLimitPct: 0,
 };
 
 let cachedTrades = [];
 let cachedTags = [...DEFAULT_TAGS];
 let riskSettings = getRiskSettingsFromLocal();
+let postDrawdownTradeIds = new Set();
+let dailyBreachDaysCount = 0;
 
 function getTradesFromLocal() {
   try {
@@ -1093,15 +1097,18 @@ function refreshDashboard() {
 function tradeRowHTML(trade) {
   const pnlClass = trade.pnl >= 0 ? 'text-profit' : 'text-loss';
   const sideClass = trade.side === 'long' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400';
+  const isPostDrawdown = postDrawdownTradeIds.has(trade.id);
+  const badgeHTML = isPostDrawdown ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-loss/10 text-loss inline-flex items-center gap-1 shrink-0" title="Post-Drawdown Revenge Trade">⚠️ Post-Drawdown</span>` : '';
   return `
     <div class="trade-row flex items-center gap-4 p-3 rounded-xl cursor-pointer" onclick="openTradeDetail('${trade.id}')">
       <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-xs font-bold text-white shrink-0">${trade.symbol.slice(0, 3)}</div>
       <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="text-sm font-semibold text-white">${trade.symbol}</span>
           <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${sideClass}">${trade.side}</span>
           ${trade.strategy ? `<span class="hidden sm:inline px-1.5 py-0.5 rounded text-[10px] bg-white/5 text-slate-300">${escapeHtml(trade.strategy)}</span>` : ''}
           ${trade.tags && trade.tags.length > 0 ? trade.tags.slice(0, 2).map(t => `<span class="hidden sm:inline px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent-light">${t}</span>`).join('') : ''}
+          ${badgeHTML}
         </div>
         <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(getAccountNameOf(trade))} | ${new Date(trade.exitDate).toLocaleDateString()}</p>
       </div>
@@ -1132,62 +1139,6 @@ function valueOrDash(value) {
 
 function formatPrice(value) {
   return value == null || Number.isNaN(Number(value)) ? '--' : Number(value).toString();
-}
-
-function renderJournal() {
-  let trades = getScopedTrades();
-  const search = document.getElementById('searchInput').value.toLowerCase();
-  const side = document.getElementById('filterSide').value;
-  const result = document.getElementById('filterResult').value;
-  const tag = document.getElementById('filterTag').value;
-  const sort = document.getElementById('sortBy').value;
-
-  if (search) {
-    trades = trades.filter(t =>
-      t.symbol.toLowerCase().includes(search) ||
-      (t.strategy && t.strategy.toLowerCase().includes(search)) ||
-      (t.notes && t.notes.toLowerCase().includes(search))
-    );
-  }
-  if (side !== 'all') trades = trades.filter(t => t.side === side);
-  if (result !== 'all') trades = trades.filter(t => t.result === result);
-  if (tag !== 'all') trades = trades.filter(t => t.tags && t.tags.includes(tag));
-
-  // Sort
-  switch (sort) {
-    case 'date-desc': trades.sort((a, b) => new Date(b.exitDate) - new Date(a.exitDate)); break;
-    case 'date-asc': trades.sort((a, b) => new Date(a.exitDate) - new Date(b.exitDate)); break;
-    case 'pnl-desc': trades.sort((a, b) => b.pnl - a.pnl); break;
-    case 'pnl-asc': trades.sort((a, b) => a.pnl - b.pnl); break;
-  }
-
-  const container = document.getElementById('journalList');
-  if (trades.length === 0) {
-    container.innerHTML = '<p class="text-slate-500 text-sm text-center py-12">No trades found matching your filters.</p>';
-  } else {
-    container.innerHTML = trades.map(t => `
-      <div class="trade-row bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-4 cursor-pointer flex items-center gap-4" onclick="openTradeDetail('${t.id}')">
-        <div class="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center text-sm font-bold text-white shrink-0">${t.symbol.slice(0, 4)}</div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-base font-semibold text-white">${t.symbol}</span>
-            <span class="px-2 py-0.5 rounded text-[11px] font-bold uppercase ${t.side === 'long' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}">${t.side}</span>
-            ${t.strategy ? `<span class="px-2 py-0.5 rounded text-[11px] bg-white/5 text-slate-300">${escapeHtml(t.strategy)}</span>` : ''}
-            ${t.tags ? t.tags.map(tag => `<span class="px-2 py-0.5 rounded text-[11px] bg-accent/10 text-accent-light">${tag}</span>`).join('') : ''}
-          </div>
-          <div class="flex items-center gap-3 mt-1.5">
-            <span class="text-xs text-slate-500">$${t.entryPrice.toFixed(2)} → $${t.exitPrice.toFixed(2)}</span>
-            <span class="text-xs text-slate-500">×${t.quantity}</span>
-            <span class="text-xs text-slate-500">${new Date(t.exitDate).toLocaleDateString()}</span>
-          </div>
-        </div>
-        <div class="text-right shrink-0">
-          <p class="text-lg font-bold ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}">${formatCurrency(t.pnl)}</p>
-          <p class="text-xs ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}">${t.r_multiple != null ? `${t.r_multiple >= 0 ? '+' : ''}${Number(t.r_multiple).toFixed(2)}R` : `${t.pnlPercent >= 0 ? '+' : ''}${t.pnlPercent}%`}</p>
-        </div>
-      </div>
-    `).join('');
-  }
 }
 
 function renderJournal() {
@@ -1259,12 +1210,15 @@ function renderJournal() {
             const planRisk = t.stop_loss_size != null ? formatCurrency(Number(t.stop_loss_size)) : '--';
             const rText = t.r_multiple != null ? `${t.r_multiple >= 0 ? '+' : ''}${Number(t.r_multiple).toFixed(2)}R` : '--';
             const psychology = [t.emotion, t.confidence ? `C${t.confidence}` : '', t.discipline ? `D${t.discipline}` : ''].filter(Boolean).join(' / ') || '--';
+            const isPostDrawdown = postDrawdownTradeIds.has(t.id);
+            const badgeHTML = isPostDrawdown ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-loss/10 text-loss inline-flex items-center gap-1 shrink-0" title="Post-Drawdown Revenge Trade">⚠️ Post-Drawdown</span>` : '';
             return `
               <tr class="trade-row cursor-pointer hover:bg-white/[0.03] transition" onclick="openTradeDetail('${t.id}')">
                 <td class="px-4 py-3">
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 flex-wrap">
                     <span class="font-semibold text-white">${escapeHtml(t.symbol)}</span>
                     <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${t.side === 'long' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}">${t.side}</span>
+                    ${badgeHTML}
                   </div>
                   <div class="mt-1 max-w-[180px] truncate text-xs text-slate-500">${escapeHtml(t.strategy || 'No strategy')}</div>
                 </td>
@@ -1345,6 +1299,10 @@ function renderCalendar() {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const trades = getScopedTrades();
+  const breachesInfo = checkDailyDrawdownBreaches(trades);
+
+  const account = getCurrentAccount();
+  const accountSize = account ? account.accountSize : 10000;
 
   // Group trades by day
   const tradesByDay = {};
@@ -1370,9 +1328,44 @@ function renderCalendar() {
     const dayPnl = dayTrades.reduce((s, t) => s + t.pnl, 0);
     const isToday = day === new Date().getDate() && month === new Date().getMonth() && year === new Date().getFullYear();
 
+    const monthStr = String(month + 1).padStart(2, '0');
+    const dayStr = String(day).padStart(2, '0');
+    const dateStr = `${year}-${monthStr}-${dayStr}`;
+
+    let bgStyle = '';
+    let tooltipText = '';
+    let isBreached = false;
+
+    if (dayTrades.length > 0) {
+      isBreached = breachesInfo.breaches[dateStr]?.breached || false;
+      const wins = dayTrades.filter(t => t.pnl > 0).length;
+      const winRate = (wins / dayTrades.length) * 100;
+      const pnlPct = (dayPnl / accountSize) * 100;
+
+      if (dayPnl > 0) {
+        const alpha = Math.min(0.08 + (pnlPct / 2) * 0.32, 0.4);
+        bgStyle = `background-color: rgba(34, 197, 94, ${alpha});`;
+      } else if (dayPnl < 0) {
+        const alpha = Math.min(0.08 + (Math.abs(pnlPct) / 2) * 0.32, 0.4);
+        bgStyle = `background-color: rgba(239, 68, 68, ${alpha});`;
+      }
+
+      tooltipText = `Date: ${dateStr}\nP&L: ${formatCurrency(dayPnl)}\nTrades: ${dayTrades.length} (${wins} W / ${dayTrades.length - wins} L)\nWin Rate: ${winRate.toFixed(1)}%\nDrawdown Status: ${isBreached ? '⚠️ Drawdown Breached' : '✓ Normal'}`;
+    } else {
+      tooltipText = `Date: ${dateStr}\n(No Trades)`;
+    }
+
+    const warningBadge = isBreached ? '<span class="text-xs" title="Daily Drawdown Breached">⚠️</span>' : '';
+
     html += `
-      <div class="cal-cell rounded-xl p-2 border ${isToday ? 'border-accent/30 bg-accent/5' : 'border-white/5'} cursor-pointer" onclick="showDayTrades(${year}, ${month}, ${day})">
-        <div class="text-xs font-medium ${isToday ? 'text-accent' : 'text-slate-400'} mb-1">${day}</div>
+      <div class="cal-cell rounded-xl p-2 border ${isToday ? 'border-accent/30 bg-accent/5' : 'border-white/5'} cursor-pointer relative" 
+           style="${bgStyle}" 
+           title="${escapeHtml(tooltipText)}" 
+           onclick="showDayTrades(${year}, ${month}, ${day})">
+        <div class="flex justify-between items-center mb-1">
+          <span class="text-xs font-medium ${isToday ? 'text-accent' : 'text-slate-400'}">${day}</span>
+          ${warningBadge}
+        </div>
         ${dayTrades.length > 0 ? `
           <div class="text-[10px] ${dayPnl >= 0 ? 'text-profit' : 'text-loss'} font-semibold">${formatCurrencyShort(dayPnl)}</div>
           <div class="text-[10px] text-slate-600">${dayTrades.length} trade${dayTrades.length > 1 ? 's' : ''}</div>
@@ -1420,6 +1413,7 @@ function refreshAnalytics() {
   renderStrategyStats(trades);
   renderWeeklySessionSummary();
   renderRiskAnalytics();
+  renderPsychologyAnalytics(trades);
 }
 
 function renderStrategyStats(trades) {
@@ -1798,6 +1792,64 @@ function renderStreakAnalysis(trades) {
   document.getElementById('streakLongest').textContent = longestDuration.toFixed(1) + 'h';
 }
 
+function checkDailyDrawdownBreaches(trades) {
+  const breaches = {};
+  const postDrawdownTradeIdsResult = new Set();
+  
+  if (!riskSettings.dailyDrawdownLimitValue && !riskSettings.dailyDrawdownLimitPct) {
+    return { breaches, postDrawdownTradeIds: postDrawdownTradeIdsResult };
+  }
+
+  const account = getCurrentAccount();
+  const accountSize = account ? account.accountSize : 10000;
+  
+  const limitValue = riskSettings.dailyDrawdownLimitValue || Infinity;
+  const limitPctValue = riskSettings.dailyDrawdownLimitPct ? (riskSettings.dailyDrawdownLimitPct * accountSize / 100) : Infinity;
+  const maxAllowedLoss = Math.min(limitValue, limitPctValue);
+  
+  if (maxAllowedLoss === Infinity || maxAllowedLoss <= 0) {
+    return { breaches, postDrawdownTradeIds: postDrawdownTradeIdsResult };
+  }
+
+  const groups = {};
+  trades.forEach(t => {
+    if (!t.exitDate) return;
+    const dateStr = t.exitDate.split('T')[0];
+    if (!groups[dateStr]) groups[dateStr] = [];
+    groups[dateStr].push(t);
+  });
+
+  Object.keys(groups).forEach(dateStr => {
+    const dayTrades = groups[dateStr].sort((a, b) => new Date(a.exitDate) - new Date(b.exitDate));
+    let runningDailyPnl = 0;
+    let breached = false;
+    
+    dayTrades.forEach(t => {
+      if (breached) {
+        postDrawdownTradeIdsResult.add(t.id);
+      }
+      
+      runningDailyPnl += t.pnl || 0;
+      if (runningDailyPnl < -maxAllowedLoss) {
+        breached = true;
+        if (!breaches[dateStr]) {
+          breaches[dateStr] = { maxLoss: Math.abs(runningDailyPnl) };
+        }
+      }
+    });
+    
+    if (breached) {
+      if (breaches[dateStr]) {
+        breaches[dateStr].breached = true;
+      } else {
+        breaches[dateStr] = { breached: true, maxLoss: Math.abs(runningDailyPnl) };
+      }
+    }
+  });
+
+  return { breaches, postDrawdownTradeIds: postDrawdownTradeIdsResult };
+}
+
 // ============ PROP FIRM RISK ANALYTICS ============
 function riskFlagClass(flag) {
   if (flag === 'violation') return 'text-loss';
@@ -1848,6 +1900,11 @@ async function renderRiskAnalytics() {
     renderAcctDailyPnlChart(data);
     renderAcctRiskChart(data);
     renderRiskRecommendation(data);
+    
+    const breachDaysEl = document.getElementById('drawdownBreachDays');
+    const revengeTradesEl = document.getElementById('postDrawdownTradesCount');
+    if (breachDaysEl) breachDaysEl.textContent = dailyBreachDaysCount;
+    if (revengeTradesEl) revengeTradesEl.textContent = postDrawdownTradeIds.size;
   } catch (e) {
     hint.classList.remove('hidden');
     content.classList.add('hidden');
@@ -1987,6 +2044,210 @@ function renderRiskRecommendation(data) {
   el.classList.remove('hidden');
 }
 
+function renderPsychologyAnalytics(trades) {
+  destroyChart('emotionPnl');
+  destroyChart('disciplinePerformance');
+
+  const highDispEl = document.getElementById('highDisciplinePnl');
+  const lowDispEl = document.getElementById('lowDisciplinePnl');
+  const bestEmotionEl = document.getElementById('bestEmotion');
+  const worstEmotionEl = document.getElementById('worstEmotion');
+
+  if (!highDispEl || !lowDispEl || !bestEmotionEl || !worstEmotionEl) return;
+
+  let highDispSum = 0, highDispCount = 0;
+  let lowDispSum = 0, lowDispCount = 0;
+  
+  const disciplineGroups = {
+    1: { pnl: 0, count: 0, wins: 0 },
+    2: { pnl: 0, count: 0, wins: 0 },
+    3: { pnl: 0, count: 0, wins: 0 },
+    4: { pnl: 0, count: 0, wins: 0 },
+    5: { pnl: 0, count: 0, wins: 0 }
+  };
+  
+  trades.forEach(t => {
+    const pnl = t.pnl || 0;
+    const disc = parseInt(t.discipline);
+    if (disc >= 1 && disc <= 5) {
+      disciplineGroups[disc].pnl += pnl;
+      disciplineGroups[disc].count += 1;
+      if (pnl > 0) disciplineGroups[disc].wins += 1;
+      
+      if (disc >= 4) {
+        highDispSum += pnl;
+        highDispCount++;
+      } else if (disc <= 2) {
+        lowDispSum += pnl;
+        lowDispCount++;
+      }
+    }
+  });
+
+  const highDispAvg = highDispCount > 0 ? highDispSum / highDispCount : 0;
+  const lowDispAvg = lowDispCount > 0 ? lowDispSum / lowDispCount : 0;
+
+  highDispEl.textContent = formatCurrency(highDispAvg);
+  highDispEl.className = `text-lg font-bold ${highDispAvg >= 0 ? 'text-profit' : 'text-loss'}`;
+  lowDispEl.textContent = formatCurrency(lowDispAvg);
+  lowDispEl.className = `text-lg font-bold ${lowDispAvg >= 0 ? 'text-profit' : 'text-loss'}`;
+
+  const emotionStats = {};
+  trades.forEach(t => {
+    if (!t.emotion) return;
+    const emo = t.emotion;
+    const pnl = t.pnl || 0;
+    if (!emotionStats[emo]) {
+      emotionStats[emo] = { pnl: 0, count: 0, wins: 0 };
+    }
+    emotionStats[emo].pnl += pnl;
+    emotionStats[emo].count += 1;
+    if (pnl > 0) emotionStats[emo].wins += 1;
+  });
+
+  let bestEmoName = '—';
+  let bestEmoVal = -Infinity;
+  let worstEmoName = '—';
+  let worstEmoVal = Infinity;
+
+  Object.entries(emotionStats).forEach(([emo, stat]) => {
+    if (stat.pnl > bestEmoVal) {
+      bestEmoVal = stat.pnl;
+      bestEmoName = emo;
+    }
+    if (stat.pnl < worstEmoVal) {
+      worstEmoVal = stat.pnl;
+      worstEmoName = emo;
+    }
+  });
+
+  if (bestEmoName !== '—') {
+    bestEmotionEl.textContent = `${bestEmoName} (${formatCurrency(bestEmoVal)})`;
+    bestEmotionEl.className = `text-lg font-bold ${bestEmoVal >= 0 ? 'text-profit' : 'text-loss'}`;
+  } else {
+    bestEmotionEl.textContent = '—';
+    bestEmotionEl.className = 'text-lg font-bold text-slate-400';
+  }
+  if (worstEmoName !== '—') {
+    worstEmotionEl.textContent = `${worstEmoName} (${formatCurrency(worstEmoVal)})`;
+    worstEmotionEl.className = `text-lg font-bold ${worstEmoVal >= 0 ? 'text-profit' : 'text-loss'}`;
+  } else {
+    worstEmotionEl.textContent = '—';
+    worstEmotionEl.className = 'text-lg font-bold text-slate-400';
+  }
+
+  const emotionCanvas = document.getElementById('emotionPnlChart');
+  if (emotionCanvas) {
+    const emos = Object.keys(emotionStats);
+    const pnlValues = emos.map(emo => emotionStats[emo].pnl);
+    const colors = pnlValues.map(v => v >= 0 ? '#22c55e' : '#ef4444');
+
+    charts.emotionPnl = new Chart(emotionCanvas, {
+      type: 'bar',
+      data: {
+        labels: emos,
+        datasets: [{
+          data: pnlValues,
+          backgroundColor: colors,
+          borderRadius: 6
+        }]
+      },
+      options: {
+        ...chartDefaults,
+        indexAxis: 'y',
+        plugins: {
+          ...chartDefaults.plugins,
+          tooltip: {
+            callbacks: {
+              label: ctx => `PnL: ${formatCurrency(ctx.parsed.x)} (${emotionStats[ctx.label].wins}/${emotionStats[ctx.label].count} wins)`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  const disciplineCanvas = document.getElementById('disciplinePerformanceChart');
+  if (disciplineCanvas) {
+    const ratings = ['1★', '2★', '3★', '4★', '5★'];
+    const avgPnls = [1, 2, 3, 4, 5].map(r => {
+      const g = disciplineGroups[r];
+      return g.count > 0 ? g.pnl / g.count : 0;
+    });
+    const winRates = [1, 2, 3, 4, 5].map(r => {
+      const g = disciplineGroups[r];
+      return g.count > 0 ? (g.wins / g.count) * 100 : 0;
+    });
+
+    charts.disciplinePerformance = new Chart(disciplineCanvas, {
+      type: 'bar',
+      data: {
+        labels: ratings,
+        datasets: [
+          {
+            label: 'Avg P&L ($)',
+            data: avgPnls,
+            backgroundColor: avgPnls.map(v => v >= 0 ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)'),
+            yAxisID: 'y',
+            borderRadius: 4
+          },
+          {
+            label: 'Win Rate (%)',
+            data: winRates,
+            type: 'line',
+            borderColor: '#6366f1',
+            borderWidth: 2,
+            pointRadius: 3,
+            fill: false,
+            yAxisID: 'y1',
+            tension: 0.1
+          }
+        ]
+      },
+      options: {
+        ...chartDefaults,
+        plugins: {
+          legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                if (ctx.datasetIndex === 0) {
+                  return `Avg P&L: ${formatCurrency(ctx.parsed.y)}`;
+                } else {
+                  return `Win Rate: ${ctx.parsed.y.toFixed(1)}%`;
+                }
+              }
+            }
+          }
+        },
+        scales: {
+          x: chartDefaults.scales.x,
+          y: {
+            type: 'linear',
+            display: true,
+            position: 'left',
+            grid: { color: 'rgba(255,255,255,0.03)' },
+            ticks: { color: '#64748b', font: { size: 10 } }
+          },
+          y1: {
+            type: 'linear',
+            display: true,
+            position: 'right',
+            grid: { drawOnChartArea: false },
+            ticks: {
+              color: '#6366f1',
+              font: { size: 10 },
+              callback: value => `${value}%`
+            },
+            min: 0,
+            max: 100
+          }
+        }
+      }
+    });
+  }
+}
+
 // ============ SETTINGS ============
 function refreshSettings() {
   renderTagsList();
@@ -1998,12 +2259,16 @@ function renderRiskSettingsForm() {
   const max = document.getElementById('riskMaxPct');
   const drawdown = document.getElementById('riskDrawdownPct');
   const growth = document.getElementById('riskGrowthPct');
+  const dailyValue = document.getElementById('riskDailyDrawdownValue');
+  const dailyPct = document.getElementById('riskDailyDrawdownPct');
   const status = document.getElementById('riskSettingsStatus');
   if (!min || !max || !drawdown || !growth) return;
   min.value = riskSettings.minRiskPct;
   max.value = riskSettings.maxRiskPct;
   drawdown.value = riskSettings.drawdownSizeDownPct;
   growth.value = riskSettings.growthSizeUpPct;
+  if (dailyValue) dailyValue.value = riskSettings.dailyDrawdownLimitValue || '';
+  if (dailyPct) dailyPct.value = riskSettings.dailyDrawdownLimitPct || '';
   if (status) {
     status.textContent = serverAvailable ? 'Synced with local server' : 'Saved in this browser';
   }
@@ -2016,6 +2281,8 @@ async function saveRiskSettings(event) {
     maxRiskPct: document.getElementById('riskMaxPct').value,
     drawdownSizeDownPct: document.getElementById('riskDrawdownPct').value,
     growthSizeUpPct: document.getElementById('riskGrowthPct').value,
+    dailyDrawdownLimitValue: document.getElementById('riskDailyDrawdownValue') ? document.getElementById('riskDailyDrawdownValue').value : 0,
+    dailyDrawdownLimitPct: document.getElementById('riskDailyDrawdownPct') ? document.getElementById('riskDailyDrawdownPct').value : 0,
   });
 
   try {
@@ -2219,6 +2486,16 @@ function showToast(msg) {
 
 // ============ REFRESH ============
 function renderCurrentPage() {
+  const scopedTrades = getScopedTrades();
+  const breachesInfo = checkDailyDrawdownBreaches(scopedTrades);
+  postDrawdownTradeIds = breachesInfo.postDrawdownTradeIds;
+  dailyBreachDaysCount = Object.values(breachesInfo.breaches).filter(b => b.breached).length;
+
+  const breachDaysEl = document.getElementById('drawdownBreachDays');
+  const postTradesEl = document.getElementById('postDrawdownTradesCount');
+  if (breachDaysEl) breachDaysEl.textContent = dailyBreachDaysCount;
+  if (postTradesEl) postTradesEl.textContent = postDrawdownTradeIds.size;
+
   switch (currentPage) {
     case 'dashboard': refreshDashboard(); break;
     case 'journal': refreshJournal(); break;

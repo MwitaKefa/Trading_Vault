@@ -154,6 +154,8 @@ const DEFAULT_RISK_SETTINGS = {
   maxRiskPct: 1.0,
   drawdownSizeDownPct: 0.5,
   growthSizeUpPct: 0.8,
+  dailyDrawdownLimitValue: 0,
+  dailyDrawdownLimitPct: 0,
 };
 
 async function getRiskSettings() {
