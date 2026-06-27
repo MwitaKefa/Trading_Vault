@@ -553,6 +553,8 @@ function openTradeModal(tradeId = null) {
       document.getElementById('tradeActualPnl').value = (trade.actual_pnl != null ? trade.actual_pnl : '');
       document.getElementById('tradeEmotion').value = trade.emotion || '';
       document.getElementById('tradeLesson').value = trade.lesson || '';
+      document.getElementById('tradeExitType').value = trade.exit_type || '';
+      document.getElementById('tradeManagement').value = trade.trade_management || '';
       applyStarRating('confidence', trade.confidence || 0);
       applyStarRating('discipline', trade.discipline || 0);
       selectedModalTags = trade.tags ? [...trade.tags] : [];
@@ -571,6 +573,8 @@ function openTradeModal(tradeId = null) {
     document.getElementById('tradeActualPnl').value = '';
     document.getElementById('tradeEmotion').value = '';
     document.getElementById('tradeLesson').value = '';
+    document.getElementById('tradeExitType').value = '';
+    document.getElementById('tradeManagement').value = '';
     document.getElementById('tradeScreenshot').value = '';
     document.getElementById('tradeScreenshotFile').value = '';
     document.getElementById('tradeAccount').value = currentAccountId || (cachedAccounts[0] ? cachedAccounts[0].id : '');
@@ -604,6 +608,8 @@ function clearTradeForm() {
   document.getElementById('tradeActualPnl').value = '';
   document.getElementById('tradeEmotion').value = '';
   document.getElementById('tradeLesson').value = '';
+  document.getElementById('tradeExitType').value = '';
+  document.getElementById('tradeManagement').value = '';
   document.getElementById('tradeScreenshot').value = '';
   document.getElementById('tradeScreenshotFile').value = '';
   selectedModalTags = [];
@@ -912,7 +918,9 @@ async function saveTrade(e) {
     confidence,
     discipline,
     emotion,
-    lesson
+    lesson,
+    exit_type: document.getElementById('tradeExitType').value || null,
+    trade_management: document.getElementById('tradeManagement').value || null,
   };
 
   const trades = getTrades();
@@ -1412,8 +1420,12 @@ function refreshAnalytics() {
   renderStreakAnalysis(trades);
   renderStrategyStats(trades);
   renderWeeklySessionSummary();
+  renderTradeStats();
+  renderExitTypeChart(trades);
+  renderTradeManagementChart(trades);
   renderRiskAnalytics();
   renderPsychologyAnalytics(trades);
+  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
 }
 
 function renderStrategyStats(trades) {
@@ -1652,16 +1664,27 @@ function renderWinLossChart(wins, losses, breakeven) {
 
 function renderSymbolPnlChart(trades) {
   destroyChart('symbolPnl');
+  const container = document.getElementById('symbolPnlChart');
+  if (!container) return;
+  const parent = container.parentElement;
+
   const bySymbol = {};
   trades.forEach(t => {
-    bySymbol[t.symbol] = (bySymbol[t.symbol] || 0) + t.pnl;
+    if (!t.symbol) return;
+    bySymbol[t.symbol] = (bySymbol[t.symbol] || 0) + (t.pnl || 0);
   });
   const sorted = Object.entries(bySymbol).sort((a, b) => b[1] - a[1]);
+
+  if (sorted.length === 0) {
+    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No trade data available.</p>';
+    return;
+  }
+
   const labels = sorted.map(s => s[0]);
-  const data = sorted.map(s => s[1]);
+  const data = sorted.map(s => Math.round(s[1] * 100) / 100);
   const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
 
-  charts.symbolPnl = new Chart(document.getElementById('symbolPnlChart'), {
+  charts.symbolPnl = new Chart(container, {
     type: 'bar',
     data: {
       labels,
@@ -1676,20 +1699,31 @@ function renderSymbolPnlChart(trades) {
 
 function renderTagPnlChart(trades) {
   destroyChart('tagPnl');
+  const container = document.getElementById('tagPnlChart');
+  if (!container) return;
+  const parent = container.parentElement;
+
   const byTag = {};
   trades.forEach(t => {
-    if (t.tags) {
+    if (Array.isArray(t.tags)) {
       t.tags.forEach(tag => {
-        byTag[tag] = (byTag[tag] || 0) + t.pnl;
+        if (!tag) return;
+        byTag[tag] = (byTag[tag] || 0) + (t.pnl || 0);
       });
     }
   });
   const sorted = Object.entries(byTag).sort((a, b) => b[1] - a[1]);
+
+  if (sorted.length === 0) {
+    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No tagged trades yet.</p>';
+    return;
+  }
+
   const labels = sorted.map(s => s[0]);
-  const data = sorted.map(s => s[1]);
+  const data = sorted.map(s => Math.round(s[1] * 100) / 100);
   const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
 
-  charts.tagPnl = new Chart(document.getElementById('tagPnlChart'), {
+  charts.tagPnl = new Chart(container, {
     type: 'bar',
     data: {
       labels,
@@ -1700,6 +1734,102 @@ function renderTagPnlChart(trades) {
       indexAxis: 'y',
     }
   });
+}
+
+function renderExitTypeChart(trades) {
+  destroyChart('exitType');
+  const container = document.getElementById('exitTypeChart');
+  if (!container) return;
+  const parent = container.parentElement;
+
+  const byType = {};
+  trades.forEach(t => {
+    const type = t.exit_type;
+    if (!type) return;
+    if (!byType[type]) byType[type] = { pnl: 0, count: 0, wins: 0 };
+    byType[type].pnl += t.pnl || 0;
+    byType[type].count++;
+    if ((t.pnl || 0) > 0) byType[type].wins++;
+  });
+
+  const entries = Object.entries(byType).sort((a, b) => b[1].pnl - a[1].pnl);
+  if (entries.length === 0) {
+    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No exit type data yet. Select a type of exit when logging trades.</p>';
+    return;
+  }
+
+  const labels = entries.map(([k, v]) => `${k} (${v.count > 0 ? ((v.wins / v.count) * 100).toFixed(0) : 0}% WR)`);
+  const data = entries.map(([, v]) => Math.round(v.pnl * 100) / 100);
+  const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
+
+  charts.exitType = new Chart(container, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: colors, borderRadius: 6 }]
+    },
+    options: { ...chartDefaults, indexAxis: 'y' }
+  });
+}
+
+function renderTradeManagementChart(trades) {
+  destroyChart('tradeManagement');
+  const container = document.getElementById('tradeManagementChart');
+  if (!container) return;
+  const parent = container.parentElement;
+
+  const byStyle = {};
+  trades.forEach(t => {
+    const style = t.trade_management;
+    if (!style) return;
+    if (!byStyle[style]) byStyle[style] = { pnl: 0, count: 0, wins: 0 };
+    byStyle[style].pnl += t.pnl || 0;
+    byStyle[style].count++;
+    if ((t.pnl || 0) > 0) byStyle[style].wins++;
+  });
+
+  const entries = Object.entries(byStyle).sort((a, b) => b[1].pnl - a[1].pnl);
+  if (entries.length === 0) {
+    parent.innerHTML = '<p class="text-slate-500 text-sm text-center py-16">No management style data yet. Select a trade management style when logging trades.</p>';
+    return;
+  }
+
+  const labels = entries.map(([k, v]) => `${k} (${v.count > 0 ? ((v.wins / v.count) * 100).toFixed(0) : 0}% WR)`);
+  const data = entries.map(([, v]) => Math.round(v.pnl * 100) / 100);
+  const colors = data.map(v => v >= 0 ? '#22c55e' : '#ef4444');
+
+  charts.tradeManagement = new Chart(container, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: colors, borderRadius: 6 }]
+    },
+    options: { ...chartDefaults, indexAxis: 'y' }
+  });
+}
+
+function renderTradeStats() {
+  const el = document.getElementById('tradeStatsContent');
+  if (!el) return;
+  const trades = getScopedTrades();
+  const long = { count: 0, wins: 0 };
+  const short = { count: 0, wins: 0 };
+  trades.forEach(t => {
+    if (t.side === 'long') { long.count++; if ((t.pnl || 0) > 0) long.wins++; }
+    else if (t.side === 'short') { short.count++; if ((t.pnl || 0) > 0) short.wins++; }
+  });
+  const longWR = long.count ? ((long.wins / long.count) * 100).toFixed(1) : '0.0';
+  const shortWR = short.count ? ((short.wins / short.count) * 100).toFixed(1) : '0.0';
+  el.innerHTML = [
+    { label: 'Long 📈', stat: long, wr: longWR },
+    { label: 'Short 📉', stat: short, wr: shortWR },
+  ].map(({ label, stat, wr }) => `
+    <div class="bg-surface-900/50 rounded-xl p-4">
+      <p class="text-xs text-slate-500 uppercase tracking-wide mb-2">${label}</p>
+      <p class="text-2xl font-bold text-white">${stat.count}</p>
+      <p class="text-xs text-slate-400 mt-1">Win rate ${wr}%</p>
+    </div>
+  `).join('');
 }
 
 function renderDailyPnlChart(trades) {

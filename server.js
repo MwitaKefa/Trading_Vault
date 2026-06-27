@@ -101,6 +101,8 @@ async function initSchema() {
     ['strategy', 'TEXT'],
     ['session', 'TEXT'],
     ['r_multiple', 'REAL'],
+    ['exit_type', 'TEXT'],
+    ['trade_management', 'TEXT'],
   ];
   for (const [col, type] of tradeAlters) {
     if (!tradeColumns.includes(col)) {
@@ -259,8 +261,8 @@ app.post('/api/trades', async (req, res) => {
     await requireTradeAccount(accountId);
     await runAsync(
       `INSERT OR REPLACE INTO trades
-       (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson,strategy,session,r_multiple)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson,strategy,session,r_multiple,exit_type,trade_management)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [t.id, t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0,
        t.entryDate, t.exitDate, JSON.stringify(t.tags || []), t.notes || '', t.screenshot || '',
        t.pnl || 0, t.pnlPercent || 0, t.result || '', accountId, stopLossSize, riskPercentage, riskFlag,
@@ -268,7 +270,8 @@ app.post('/api/trades', async (req, res) => {
        t.actual_sl != null ? t.actual_sl : null, t.actual_pnl != null ? t.actual_pnl : null,
        t.confidence != null ? t.confidence : null, t.discipline != null ? t.discipline : null,
        t.emotion || null, t.lesson || null, t.strategy || null, t.session || null,
-       t.r_multiple != null ? t.r_multiple : null]
+       t.r_multiple != null ? t.r_multiple : null,
+       t.exit_type || null, t.trade_management || null]
     );
     res.json({ success: true, id: t.id, accountId, stopLossSize, riskPercentage, riskFlag });
   } catch (err) {
@@ -283,7 +286,7 @@ app.put('/api/trades/:id', async (req, res) => {
     const { accountId, stopLossSize, riskPercentage, riskFlag } = await resolveTradeRisk(t);
     await requireTradeAccount(accountId);
     await runAsync(
-      `UPDATE trades SET symbol=?,side=?,entryPrice=?,exitPrice=?,quantity=?,fees=?,entryDate=?,exitDate=?,tags=?,notes=?,screenshot=?,pnl=?,pnlPercent=?,result=?,account_id=?,stop_loss_size=?,risk_percentage=?,risk_flag=?,planned_sl=?,planned_tp=?,actual_sl=?,actual_pnl=?,confidence=?,discipline=?,emotion=?,lesson=?,strategy=?,session=?,r_multiple=? WHERE id=?`,
+      `UPDATE trades SET symbol=?,side=?,entryPrice=?,exitPrice=?,quantity=?,fees=?,entryDate=?,exitDate=?,tags=?,notes=?,screenshot=?,pnl=?,pnlPercent=?,result=?,account_id=?,stop_loss_size=?,risk_percentage=?,risk_flag=?,planned_sl=?,planned_tp=?,actual_sl=?,actual_pnl=?,confidence=?,discipline=?,emotion=?,lesson=?,strategy=?,session=?,r_multiple=?,exit_type=?,trade_management=? WHERE id=?`,
       [t.symbol, t.side, t.entryPrice, t.exitPrice, t.quantity, t.fees || 0, t.entryDate, t.exitDate,
        JSON.stringify(t.tags || []), t.notes || '', t.screenshot || '', t.pnl || 0, t.pnlPercent || 0, t.result || '',
        accountId, stopLossSize, riskPercentage, riskFlag,
@@ -291,7 +294,8 @@ app.put('/api/trades/:id', async (req, res) => {
        t.actual_sl != null ? t.actual_sl : null, t.actual_pnl != null ? t.actual_pnl : null,
        t.confidence != null ? t.confidence : null, t.discipline != null ? t.discipline : null,
        t.emotion || null, t.lesson || null, t.strategy || null, t.session || null,
-       t.r_multiple != null ? t.r_multiple : null, id]
+       t.r_multiple != null ? t.r_multiple : null,
+       t.exit_type || null, t.trade_management || null, id]
     );
     res.json({ success: true, accountId, stopLossSize, riskPercentage, riskFlag });
   } catch (err) {
@@ -318,7 +322,7 @@ app.delete('/api/trades/:id', (req, res) => {
 app.post('/api/trades/bulk', (req, res) => {
   const trades = req.body;
   if (!Array.isArray(trades)) return res.status(400).json({ error: 'Expected array' });
-  const insert = db.prepare(`INSERT OR REPLACE INTO trades (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson,strategy,session,r_multiple) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insert = db.prepare(`INSERT OR REPLACE INTO trades (id,symbol,side,entryPrice,exitPrice,quantity,fees,entryDate,exitDate,tags,notes,screenshot,pnl,pnlPercent,result,account_id,stop_loss_size,risk_percentage,risk_flag,planned_sl,planned_tp,actual_sl,actual_pnl,confidence,discipline,emotion,lesson,strategy,session,r_multiple,exit_type,trade_management) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     trades.forEach(t => insert.run(
@@ -339,7 +343,9 @@ app.post('/api/trades/bulk', (req, res) => {
       t.lesson || null,
       t.strategy || null,
       t.session || null,
-      t.r_multiple != null ? t.r_multiple : null
+      t.r_multiple != null ? t.r_multiple : null,
+      t.exit_type || null,
+      t.trade_management || null
     ));
     db.run('COMMIT', err => {
       if (err) return res.status(500).json({ error: err.message });

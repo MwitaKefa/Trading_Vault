@@ -267,9 +267,29 @@
           </div>
         </div>
       </div>
-      <div id="sessionStats" class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6 mb-6">
-        <h3 class="text-sm font-semibold text-white mb-4">Session Stats</h3>
-        <div id="sessionStatsContent" class="flex gap-4"></div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div id="sessionStats" class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Session Stats</h3>
+          <div id="sessionStatsContent" class="flex gap-4"></div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Trade Stats</h3>
+          <div id="tradeStatsContent" class="flex gap-4"></div>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Performance by Exit Type</h3>
+          <div class="h-64">
+            <canvas id="exitTypeChart"></canvas>
+          </div>
+        </div>
+        <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold text-white mb-4">Performance by Trade Management Style</h3>
+          <div class="h-64">
+            <canvas id="tradeManagementChart"></canvas>
+          </div>
+        </div>
       </div>
       <div class="bg-surface-800/50 backdrop-blur border border-white/5 rounded-2xl p-6 mb-6">
         <h3 class="text-sm font-semibold text-white mb-4">Strategy Edge</h3>
@@ -662,6 +682,26 @@
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1.5">Fees</label>
               <input id="tradeFees" type="number" step="any" placeholder="0.00" value="0" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-accent/50 transition">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Type of Exit</label>
+              <select id="tradeExitType" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+                <option value="">— Select —</option>
+                <option value="Trailing Stop Hit">Trailing Stop Hit</option>
+                <option value="Breakeven">Breakeven</option>
+                <option value="Manual Exit">Manual Exit</option>
+                <option value="Target Hit">Target Hit</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1.5">Trade Management Style</label>
+              <select id="tradeManagement" class="w-full px-4 py-2.5 bg-surface-900/50 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-accent/50 transition">
+                <option value="">— Select —</option>
+                <option value="Active Trade Management">Active Trade Management</option>
+                <option value="Set and Forget">Set and Forget</option>
+              </select>
             </div>
           </div>
           <div>
